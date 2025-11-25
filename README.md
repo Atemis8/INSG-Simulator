@@ -1,4 +1,36 @@
-# LMECA2660 Project
+# Incompressible Navier Stokes simulator
+# Navier–Stokes Fluid Simulation
+
+This project implements a grid-based solver for the incompressible Navier–Stokes equations. It supports both **periodic** and **static (solid-wall)** boundary conditions, allowing controlled experiments in a variety of fluid-flow scenarios.
+
+## Features
+
+### Core Solver
+- Incompressible flow simulation on a MAC Mesh  
+- Semi-implicit time integration with configurable timesteps  
+- Velocity and pressure fields updated through diffusion, advection, and projection steps
+
+### Boundary Conditions
+- **Periodic:** suitable for unbounded or tiled domains  
+- **Static (no-slip):** suitable for simulations involving rigid walls or confined volumes  
+
+## Usage
+
+1. **Configure the domain**  
+   Set resolution, timestep, viscosity, and boundary-condition mode.
+
+2. **Run the simulation loop**  
+   Each iteration executes advection, diffusion, projection, and boundary updates.
+
+3. **Visualize results**  
+   Use the included visualization tools or export field data.
+
+## Applications
+
+- Educational demonstrations  
+- Numerical-methods development  
+- Graphics and game physics prototypes  
+- Boundary-condition comparison studies  
 
 It is recommended to use VSCode with the remote explorer extension and the provided docker container.
 To do so, make sure you have:
@@ -27,7 +59,7 @@ tar -xvf petsc-3.20.5.tar.gz && cd petsc-3.20.5
     --with-cc=gcc \
     --with-cxx=g++ \
     --with-debugging=1 \    # or 0 for the "optimized" mode
-    --with-mpi=0 \          # or --download-mpich to compile with MPI support
+    --with-mpi=1 \          # or --download-mpich to compile with MPI support
     --download-fblaslapack
 # For the rest, you can simply follow the instructions on the terminal
 make [...] all -j
