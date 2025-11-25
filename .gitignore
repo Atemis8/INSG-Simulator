@@ -1,0 +1,6 @@
+dump/*
+.DS_Store
+.vscode
+*.mp4
+main
+obj/*
