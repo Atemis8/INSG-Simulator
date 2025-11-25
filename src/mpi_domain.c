@@ -79,7 +79,7 @@ void print_field(double *field, MPIDomain *domain, const char *label) {
         
         // Add markers for regions
         if (y == domain->tny - 1) printf(" <- North ghost");
-        else if (y == domain->ghost_width + domain->ny) printf(" <- North interior boundary");
+        else if (y == domain->ghost_width + domain->ny - 1) printf(" <- North interior boundary");
         else if (y == domain->ghost_width) printf(" <- South interior boundary");
         else if (y == 0) printf(" <- South ghost");
         printf("\n");
@@ -147,9 +147,9 @@ MPIDomain init_mpi(int argc, char *argv[], int global_nx, int global_ny) {
 
     // Find corner ranks
     int offset1[2] = {+1, -1};
-    int offset2[2] = {-1, +1};
+    int offset2[2] = {+1, +1};
     MPI_Cart_shift_nd(domain.cart_comm, offset1, 2, &domain.nw, &domain.se);
-    MPI_Cart_shift_nd(domain.cart_comm, offset2, 2, &domain.ne, &domain.sw);
+    MPI_Cart_shift_nd(domain.cart_comm, offset2, 2, &domain.sw, &domain.ne);
     
     // Calculate local domain sizes
     int base_nx = global_nx / domain.dims[0];
@@ -224,23 +224,27 @@ void synchronize_cells(double *field, MPIDomain *domain) {
     
     req_count = 0;
     if (domain->ne != MPI_PROC_NULL) {
-        MPI_Irecv(&field[xytok(nx+gw, ny+gw, tny)], 1, domain->corner, domain->east, 0, domain->cart_comm, &requests[req_count++]);
-        MPI_Isend(&field[xytok(nx, ny, tny)], 1, domain->corner, domain->east, 1, domain->cart_comm, &requests[req_count++]);
+        printf("Doing NE exchange on rank %d \n", rank);
+        MPI_Irecv(&field[xytok(nx+gw, ny+gw, tny)], 1, domain->corner, domain->ne, 0, domain->cart_comm, &requests[req_count++]);
+        MPI_Isend(&field[xytok(nx, ny, tny)], 1, domain->corner, domain->ne, 1, domain->cart_comm, &requests[req_count++]);
     }
     
     if (domain->sw != MPI_PROC_NULL) { 
-        MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->corner, domain->west, 1, domain->cart_comm, &requests[req_count++]);
-        MPI_Isend(&field[xytok(gw, gw, tny)], 1, domain->corner, domain->west, 0, domain->cart_comm, &requests[req_count++]);
+        printf("Doing SW exchange on rank %d \n", rank);
+        MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->corner, domain->sw, 1, domain->cart_comm, &requests[req_count++]);
+        MPI_Isend(&field[xytok(gw, gw, tny)], 1, domain->corner, domain->sw, 0, domain->cart_comm, &requests[req_count++]);
     }
     
     if (domain->nw != MPI_PROC_NULL) {
-        MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->corner, domain->north, 2, domain->cart_comm, &requests[req_count++]);
-        MPI_Isend(&field[xytok(gw, ny, tny)], 1, domain->corner, domain->north, 3, domain->cart_comm, &requests[req_count++]);
+        printf("Doing NW exchange on rank %d \n", rank);
+        MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->corner, domain->nw, 2, domain->cart_comm, &requests[req_count++]);
+        MPI_Isend(&field[xytok(gw, ny, tny)], 1, domain->corner, domain->nw, 3, domain->cart_comm, &requests[req_count++]);
     }
     
     if (domain->se != MPI_PROC_NULL) {
-        MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->corner, domain->south, 3, domain->cart_comm, &requests[req_count++]);
-        MPI_Isend(&field[xytok(nx, gw, tny)], 1, domain->corner, domain->south, 2, domain->cart_comm, &requests[req_count++]);
+        printf("Doing SE exchange on rank %d \n", rank);
+        MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->corner, domain->se, 3, domain->cart_comm, &requests[req_count++]);
+        MPI_Isend(&field[xytok(nx, gw, tny)], 1, domain->corner, domain->se, 2, domain->cart_comm, &requests[req_count++]);
     }
     
     MPI_Waitall(req_count, requests, statuses);

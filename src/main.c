@@ -113,37 +113,40 @@ void sim_step(Simulation *sim) {
 
 int main(int argc, char *argv[]) {
 
+    bool load_sim = false;
+    bool testing = false;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--load") == 0) load_sim = true;
+        if (strcmp(argv[i], "--test") == 0) testing = true;
+    }
+
 #ifdef USE_MPI
-    test_mpidomain(argc, argv, 4, 16);
     MPI_Finalize();
-    exit(0);
     // init_mpi(argc, argv);
 #endif
 
     // test_vectorfield_integration(1.5, 1.5, 0.01);
     PetscInitialize(&argc, &argv, 0, 0);
     
-    if (mpi_rank() == 0) {
-        mprintf("Testing the finite differences \n");
-        test_grad_term(1.0, 1.0, 1.0 / (1ULL << 4));
-        test_grad_term(1.0, 1.0, 1.0 / (1ULL << 8));
+    if (testing) {
+        if (mpi_rank() == 0) {
+            mprintf("Testing the finite differences \n");
+            test_grad_term(1.0, 1.0, 1.0 / (1ULL << 4));
+            test_grad_term(1.0, 1.0, 1.0 / (1ULL << 8));
 
-        test_viscosity(1.0, 1.0, 1.0 / (1ULL << 4));
-        test_viscosity(1.0, 1.0, 1.0 / (1ULL << 8));
+            test_viscosity(1.0, 1.0, 1.0 / (1ULL << 4));
+            test_viscosity(1.0, 1.0, 1.0 / (1ULL << 8));
 
-        test_convective(1.0, 1.0, 1.0 / (1ULL << 4));
-        test_convective(1.0, 1.0, 1.0 / (1ULL << 8));
+            test_convective(1.0, 1.0, 1.0 / (1ULL << 4));
+            test_convective(1.0, 1.0, 1.0 / (1ULL << 8));
 
-        test_divergence(1.0, 1.0, 1.0 / (1ULL << 4));
-        test_divergence(1.0, 1.0, 1.0 / (1ULL << 8));
-    }
+            test_divergence(1.0, 1.0, 1.0 / (1ULL << 4));
+            test_divergence(1.0, 1.0, 1.0 / (1ULL << 8));
 
-    test_poisson_solver(100);
-
-    bool load_sim = false;
-
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--load") == 0) load_sim = true;
+        }
+        test_mpidomain(argc, argv, 16, 16);
+        test_poisson_solver(100);
     }
 
     int ep = 0;

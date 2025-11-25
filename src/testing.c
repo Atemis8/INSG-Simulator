@@ -310,69 +310,8 @@ void test_mpidomain(int argc, char **argv, int global_nx, int global_ny) {
     MPI_Barrier(MPI_COMM_WORLD);
     
     for (int r = 0; r < domain.size; r++) {
-        if (r == domain.rank) {
-            print_field(field, &domain, "AFTER GHOST EXCHANGE");
-            
-            // Verify ghost cells are filled
-            printf("\nVerification for Rank %d:\n", domain.rank);
-            int errors = 0;
-            
-            // Check west ghost
-            if (domain.west != MPI_PROC_NULL) {
-                printf("  West ghost (x=0): ");
-                for (int y = gw; y < gw + domain.ny; y++) {
-                    if (field[xytok(0, y, domain.tny)] < 0) {
-                        printf("ERROR at y=%d ", y);
-                        errors++;
-                    }
-                }
-                if (errors == 0) printf("OK");
-                printf("\n");
-            }
-            
-            // Check east ghost
-            if (domain.east != MPI_PROC_NULL) {
-                printf("  East ghost (x=%d): ", gw + domain.nx);
-                for (int y = gw; y < gw + domain.ny; y++) {
-                    if (field[xytok(gw + domain.nx, y, domain.tny)] < 0) {
-                        printf("ERROR at y=%d ", y);
-                        errors++;
-                    }
-                }
-                if (errors == 0) printf("OK");
-                printf("\n");
-            }
-            
-            // Check south ghost
-            if (domain.south != MPI_PROC_NULL) {
-                printf("  South ghost (y=0): ");
-                for (int x = gw; x < gw + domain.nx; x++) {
-                    if (field[xytok(x, 0, domain.tny)] < 0) {
-                        printf("ERROR at x=%d ", x);
-                        errors++;
-                    }
-                }
-                if (errors == 0) printf("OK");
-                printf("\n");
-            }
-            
-            // Check north ghost
-            if (domain.north != MPI_PROC_NULL) {
-                printf("  North ghost (y=%d): ", gw + domain.ny);
-                for (int x = gw; x < gw + domain.nx; x++) {
-                    if (field[xytok(x, gw + domain.ny, domain.tny)] < 0) {
-                        printf("ERROR at x=%d ", x);
-                        errors++;
-                    }
-                }
-                if (errors == 0) printf("OK");
-                printf("\n");
-            }
-            
-            if (errors > 0) {
-                printf("  TOTAL ERRORS: %d\n", errors);
-            }
-        }
+        if (r == domain.rank) print_field(field, &domain, "AFTER GHOST EXCHANGE");
+
         MPI_Barrier(MPI_COMM_WORLD);
     }
 }
