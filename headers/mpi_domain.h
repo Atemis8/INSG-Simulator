@@ -12,6 +12,7 @@ typedef struct {
     
     // Neighbor ranks (MPI_PROC_NULL if no neighbor)
     int north, south, east, west;
+    int nw, sw, ne, se;
     
     // Global domain info
     int global_nx, global_ny;
@@ -27,6 +28,7 @@ typedef struct {
     // MPI datatypes for communication
     MPI_Datatype x_slice;  // For north-south communication
     MPI_Datatype y_slice;  // For east-west communication
+    MPI_Datatype corner;
 } MPIDomain;
 
 int mpi_rank();
