@@ -4,8 +4,15 @@
 int rank = 0;
 int mpi_rank() {return rank;}
 
-
 // MPI Helper functions
+#ifdef USE_MPI
+
+void init_mpi(int argc, char *argv[]) {
+    int mpi_initialized;
+    MPI_Initialized(&mpi_initialized);
+    if (!mpi_initialized) MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+}
 
 int MPI_Cart_shift_nd(
     MPI_Comm cart_comm,
@@ -108,27 +115,20 @@ Note : the x-direction is the horizontal axis and y direction is the vertical ax
 which means we are using standart carthesian coordiantes. However the memory layout 
 is a bit different since the index since it is #define xytok(x, y, ny) ((x) * (ny) + (y))
 which means the indexing is "column" major
-
-Currently no exchange is done on the corners
 */
-MPIDomain init_mpi(int argc, char *argv[], int global_nx, int global_ny) {
+MPIDomain init_domain(int global_nx, int global_ny, int gw) {
     MPIDomain domain;
-    domain.ghost_width = 2;
+    domain.ghost_width = gw;
     domain.global_nx = global_nx;
     domain.global_ny = global_ny;
     
-    // Initialize MPI if not already done
-    int mpi_initialized;
-    MPI_Initialized(&mpi_initialized);
-    if (!mpi_initialized) MPI_Init(&argc, &argv);
-    
-    MPI_Comm_rank(MPI_COMM_WORLD, &domain.rank);
     MPI_Comm_size(MPI_COMM_WORLD, &domain.size);
-    rank = domain.rank;
+    domain.rank = mpi_rank();
     
     // Create optimal 2D decomposition
-    domain.dims[0] = 0; 
-    domain.dims[1] = 0;
+    domain.dims[0] = 1; 
+    domain.dims[1] = 1;
+    
     MPI_Dims_create(domain.size, 2, domain.dims);
     mprintf("MPI Grid: %d x %d processes\n", domain.dims[0], domain.dims[1]);
     
@@ -248,4 +248,63 @@ void synchronize_cells(double *field, MPIDomain *domain) {
     }
     
     MPI_Waitall(req_count, requests, statuses);
+}
+
+#else
+
+void init_mpi(int argc, char *argv[]) {}
+void synchronize_cells(double *field, MPIDomain *domain) {}
+void print_field(double *field, MPIDomain *domain, const char *label) {}
+
+MPIDomain init_domain(int global_nx, int global_ny, int gw) { 
+    MPIDomain domain;
+    domain.rank = mpi_rank();
+    domain.size = 1;
+    domain.ghost_width = gw;
+
+    domain.dims[0] = 1;
+    domain.dims[1] = 1;
+
+    domain.coords[0] = 0;
+    domain.coords[1] = 0;
+    
+    domain.north = MPI_PROC_NULL;
+    domain.south = MPI_PROC_NULL;
+    domain.east = MPI_PROC_NULL;
+    domain.west = MPI_PROC_NULL;
+
+    domain.nw = MPI_PROC_NULL;
+    domain.ne = MPI_PROC_NULL;
+    domain.sw = MPI_PROC_NULL;
+    domain.se = MPI_PROC_NULL;
+    
+    domain.global_nx = global_nx;
+    domain.global_ny = global_ny;
+
+    int base_nx = global_nx / domain.dims[0];
+    int extra_nx = global_nx % domain.dims[0];
+    int base_ny = global_ny / domain.dims[1];
+    int extra_ny = global_ny % domain.dims[1];
+    
+    domain.nx = base_nx + (domain.coords[0] < extra_nx ? 1 : 0);
+    domain.ny = base_ny + (domain.coords[1] < extra_ny ? 1 : 0);
+    
+    domain.start_x = domain.coords[0] * base_nx + (domain.coords[0] < extra_nx ? domain.coords[0] : extra_nx);
+    domain.start_y = domain.coords[1] * base_ny + (domain.coords[1] < extra_ny ? domain.coords[1] : extra_ny);
+    
+    domain.tnx = domain.nx + 2 * domain.ghost_width;
+    domain.tny = domain.ny + 2 * domain.ghost_width;
+
+    return domain; 
+}
+
+#endif
+
+void synchronize_field(ScalarField *field, MPIDomain *domain) {
+    synchronize_cells(field->v, domain);
+}
+
+void synchronize_vecfield(VectorField *field, MPIDomain *domain) {
+    synchronize_field(&field->u, domain);
+    synchronize_field(&field->v, domain);
 }

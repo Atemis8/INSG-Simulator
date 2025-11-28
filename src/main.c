@@ -20,16 +20,13 @@
 #include <stdbool.h>
 #include <time.h>
 
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
-
 double rectangle(double x, double y) {
     return (fabs(x-PI) < 0.5 && fabs(y-PI) < 0.5) ? 1.0 : 0.0;
 }
 
 void sim_step(Simulation *sim) {
     // ensure_debug_dir();
+    MPIDomain *domain = &(sim->params->domain);
     MACMesh *mesh = &(sim->mesh);
     VectorField *vstar = &(sim->vstar);
     VectorField *Hnm1 = &(sim->Hnm1);
@@ -44,16 +41,19 @@ void sim_step(Simulation *sim) {
     VectorField *buffer = &sim->buffer;
 
     // Computation of the viscosity term
+    // synchronize_vecfield(&mesh->uv, domain);
     viscosity_term(mesh, vstar, set_scal);
     op_vecfield(vstar, dt * sim->params->nu, mul_scal);
 
     // Computation of the gradient term
+    // synchronize_field(&mesh->P, domain);
     grad_field(buffer, &(mesh->P), mesh->h, set_scal);
     op_vecfieldwise_mul(vstar, buffer, dt, sub_scal);
 
     // Computation of convective term
     if (sim->mode == M_BOUNDARY) mesh->vmesh.x = body->ufish;
     
+    // synchronize_vecfield(&mesh->uv, domain);
     divergence_form(mesh, Hn, set_scal);
     op_vecfieldwise_mul(Hnm1, Hn, 3, sub_scal);
     op_vecfieldwise_mul(vstar, Hnm1, 0.5 * dt, add_scal);
@@ -73,21 +73,23 @@ void sim_step(Simulation *sim) {
     // Updates ghost points
     if (sim->mode == M_BOUNDARY) bc_outflow(mesh,vstar, body->ufish, dt);
     
-    update_ghost_points(vstar,mesh, sim->mode,body->ufish,dt);
+    update_ghost_points(domain, vstar, mesh, sim->mode,body->ufish,dt);
 
     // Compute the poisson problem 
+    // synchronize_vecfield(vstar, domain);
     divergence(phi, vstar, mesh->h, set_scal);
     poisson_solver(&(sim->pdata), phi, phi);
 
     op_field(phi, mesh->h * mesh->h, mul_scal);
     op_vecfieldwise(&(mesh->uv), vstar, set_scal);
+    // synchronize_field(phi, domain);
     grad_field(&(mesh->uv), phi, mesh->h, sub_scal);
 
     // Computes forces on the fish
     op_vecfield(&body->mask, 1.0, sub_scal); // X * dt / dtau
     op_vecfieldwise(vstar, &body->mask, mul_scal); // v* * X * dt / dtau 
     op_vecfieldwise(vstar, vsn1, sub_scal); // (v*-vsn1) * X * dt / dtau 
-    compute_forces(body,vstar, sim->mode);
+    compute_forces(body, vstar, sim->mode);
 
     // Now simply add this to the original values
     op_fieldwise_mul(&(mesh->P), phi, (1/dt), add_scal);
@@ -97,36 +99,18 @@ void sim_step(Simulation *sim) {
     assert(!(has_nan_field(&(mesh->P))));
 
     double cfl = (absmax_field(&(mesh->uv.u)) + absmax_field(&(mesh->uv.v))) * sim->params->dt / mesh->h;
-    mprintf(" CFL = %.2f \
-        \n", cfl 
-        /*, dts: %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f
-        (double)(t1 - t0) / (double) ttot, // Viscosity
-        (double)(t2 - t1) / (double) ttot, // Gradient
-        (double)(t3 - t2) / (double) ttot, // Convective
-        (double)(t4 - t3) / (double) ttot, // Penalization comp
-        (double)(t5 - t4) / (double) ttot, // Penalization add
-        (double)(t7 - t5) / (double) ttot, // Poisson
-        (double)(t8 - t7) / (double) ttot, // Grad
-        (double)(t9 - t8) / (double) ttot  // Final comps */
-    );
+    mprintf(" CFL = %.2f \n", cfl);
 }
 
 int main(int argc, char *argv[]) {
 
-    bool load_sim = false;
     bool testing = false;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--load") == 0) load_sim = true;
         if (strcmp(argv[i], "--test") == 0) testing = true;
     }
 
-#ifdef USE_MPI
-    MPI_Finalize();
-    // init_mpi(argc, argv);
-#endif
-
-    // test_vectorfield_integration(1.5, 1.5, 0.01);
+    init_mpi(argc, argv);
     PetscInitialize(&argc, &argv, 0, 0);
     
     if (testing) {
@@ -145,7 +129,7 @@ int main(int argc, char *argv[]) {
             test_divergence(1.0, 1.0, 1.0 / (1ULL << 8));
 
         }
-        test_mpidomain(argc, argv, 16, 16);
+        test_mpidomain(16, 16);
         test_poisson_solver(100);
     }
 
@@ -153,17 +137,13 @@ int main(int argc, char *argv[]) {
     SimulationParams params;
     Simulation sim;
 
-    if(load_sim) {
-        params = load_params("dump");
-        sim = load_simulation(&params, "dump", &ep);
-    } else {
-        params = default_params(256, 1000, 2.0, 1.0, M_PERIODIC);
-        sim = init_simulation(&params);
-        initialize_dump("dump");
-    }
+
+    default_params(&params, 256, 1000, 1.0, 1.5, M_PERIODIC);
+    initialize_dump("dump");
+    init_simulation(&sim, &params, argc, argv);
 
     PostProcessor post = initialize_postprocessor(&sim, "dump");
-    mprintf("Fourrier :  %.3e, dt : %.3e, nu : %.3e, nx : %d, ny : %d, h : %.3e \n", params.nu * params.dt / (sim.mesh.h * sim.mesh.h), params.dt, params.nu, params.body.nx, params.body.ny,params.h);
+    mprintf("Fourrier :  %.3e, dt : %.3e, nu : %.3e, nx : %d, ny : %d, h : %.3e \n", params.nu * params.dt / (sim.mesh.h * sim.mesh.h), params.dt, params.nu, params.domain.tnx, params.domain.tny,params.h);
     dump_params(&params, &post);
     
     // Initializes the simulation

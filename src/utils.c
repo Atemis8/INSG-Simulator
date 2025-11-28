@@ -104,51 +104,6 @@ void save_field(ScalarField* f, const char *filename) {
     fclose(fp);
 }
 
-ScalarField load_field(const char *filename) {
-    FILE *fp = fopen(filename, "rb");
-    if (!fp) {
-        perror("Failed to open file");
-        exit(1);
-    }
-
-    char magic[6];
-    fread(magic, 1, 6, fp);
-    if (memcmp(magic, "\x93NUMPY", 6) != 0) {
-        fprintf(stderr, "Invalid .npy file\n");
-        fclose(fp);
-        exit(1);
-    }
-
-    uint8_t major, minor;
-    fread(&major, 1, 1, fp);
-    fread(&minor, 1, 1, fp);
-
-    uint16_t header_len;
-    fread(&header_len, 2, 1, fp);
-
-    char header[256] = {0};
-    fread(header, 1, header_len, fp);
-
-    int ny = 0, nx = 0;
-    if (sscanf(header, "{'descr': '<f8', 'fortran_order': True, 'shape': (%d, %d)", &ny, &nx) != 2) {
-        fprintf(stderr, "Failed to parse shape from header\n");
-        fclose(fp);
-        exit(1);
-    }
-
-    ScalarField f = allocate_field(nx, ny);
-    size_t n = fread(f.v, sizeof(double), nx * ny, fp);
-    if (n != (size_t)(nx * ny)) {
-        fprintf(stderr, "Failed to read all data\n");
-        free(f.v);
-        fclose(fp);
-        exit(1);
-    }
-
-    fclose(fp);
-    return f;
-}
-
 void save_scalar_value(double value, const char *filename) {
     FILE *fp = fopen(filename, "ab"); 
     if (fp == NULL) {
@@ -163,60 +118,11 @@ void save_scalar_value(double value, const char *filename) {
 PostProcessor initialize_postprocessor(Simulation *s, const char* dir_path) {
     MACMesh *m = &s->mesh;
     return (PostProcessor) {
-        .w = allocate_field(m->P.nx-1, m->P.ny-1), 
+        // make vorticity field a little bigger than it needs to be so that all fields have the same sizes
+        .w = allocate_field(m->P.nx, m->P.ny),
         .dir = dir_path,
         .m = s
     };
-}
-
-SimulationParams load_params(const char *dir) {
-    char filename[256];
-    snprintf(filename, sizeof(filename), "%s/sim.params", dir);
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        perror("Failed to open sim.params");
-        exit(1);
-    }
-
-    double nu = 0, dt = 0, dtau = 0, h = 0, Re = 0;
-    double L = 0, H = 0, Lfish = 0;
-    int dump_period = 0, mode = 0, nx = 0, ny = 0;
-
-    char line[128];
-    while (fgets(line, sizeof(line), file)) {
-        double val;
-        int ival;
-        if (sscanf(line, "nu=%lf", &val) == 1) nu = val;
-        else if (sscanf(line, "dt=%lf", &val) == 1) dt = val;
-        else if (sscanf(line, "dtau=%lf", &val) == 1) dtau = val;
-        else if (sscanf(line, "h=%lf", &val) == 1) h = val;
-        else if (sscanf(line, "Re=%lf", &val) == 1) Re = val;
-        else if (sscanf(line, "L=%lf", &val) == 1) L = val;
-        else if (sscanf(line, "H=%lf", &val) == 1) H = val;
-        else if (sscanf(line, "Lfish=%lf", &val) == 1) Lfish = val;
-        else if (sscanf(line, "dump=%d", &ival) == 1) dump_period = ival;
-        else if (sscanf(line, "mode=%d", &ival) == 1) mode = ival;
-        else if (sscanf(line, "nx=%d", &ival) == 1) nx = ival;
-        else if (sscanf(line, "ny=%d", &ival) == 1) ny = ival;
-    }
-
-    fclose(file);
-
-    FishData body = initialize_body(L, H, h, dt, Lfish, nx, ny, mode);
-
-    SimulationParams params = {
-        .nu = nu,
-        .dt = dt,
-        .dtau = dtau,
-        .h = h,
-        .Re = Re,
-        .dump_period = dump_period,
-        .mode = mode,
-        .num_epsiodes = 30000,
-        .body = body
-    };
-
-    return params;
 }
 
 void dump_params(SimulationParams *params, PostProcessor *p) {
@@ -236,8 +142,8 @@ void dump_params(SimulationParams *params, PostProcessor *p) {
     fprintf(file, "Lfish=%.12e\n", params->body.Lfish);
     fprintf(file, "dump=%d\n", params->dump_period);
     fprintf(file, "mode=%d\n", params->mode);
-    fprintf(file, "nx=%d\n", params->body.nx);
-    fprintf(file, "ny=%d\n", params->body.ny);
+    fprintf(file, "nx=%d\n", params->domain.tnx);
+    fprintf(file, "ny=%d\n", params->domain.tny);
     fclose(file);
 }
 
@@ -312,25 +218,6 @@ static int get_latest_episode(const char *dir) {
     }
 
     return max_ep;
-}
-
-Simulation load_simulation(SimulationParams *params, const char *dir, int *ep_o) {
-    Simulation sim = init_simulation(params);
-
-    *ep_o = get_latest_episode(dir);
-    sim.t = params->dt * *ep_o;
-
-    char filename[256];
-    snprintf(filename, sizeof(filename), "%s/u_%05d.npy", dir, *ep_o);
-    sim.mesh.uv.u = load_field(filename);
-
-    snprintf(filename, sizeof(filename), "%s/v_%05d.npy", dir, *ep_o);
-    sim.mesh.uv.v = load_field(filename);
-
-    snprintf(filename, sizeof(filename), "%s/P_%05d.npy", dir, *ep_o);
-    sim.mesh.P = load_field(filename);
-
-    return sim;
 }
 
 double mod_d(double x, double N) {

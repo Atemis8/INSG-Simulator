@@ -72,7 +72,7 @@ def wuv():
 
         w_data = np.load(w_frame_dict[available_frames_w[100]])
         rang = np.max(np.abs(w_data))
-        im = ax.imshow(w_data0, cmap="coolwarm", origin="lower", animated=True, vmin=-rang, vmax=rang)
+        im = ax.imshow(w_data0[:-1, :-1], cmap="coolwarm", origin="lower", animated=True, vmin=-rang, vmax=rang)
         mask = ax.imshow(m_data0, cmap=black_cmap, origin="lower", alpha=1.0, vmin=0, vmax=1, animated=True)
 
         ax.set_aspect('equal')
@@ -89,7 +89,7 @@ def wuv():
         frame_num = available_frames_w[i]
 
         w_arr = np.load(w_frame_dict[frame_num])
-        im.set_array(w_arr)
+        im.set_array(w_arr[:-1, :-1])
 
         m_arr = np.load(m_frame_dict[frame_num])
         mask.set_array(m_arr)
@@ -126,7 +126,7 @@ def wuv_periodic(frames_dir="dump"):
     plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
     ax.axis('off')
 
-    im = ax.imshow(np.tile(w_data0, dupl), cmap="coolwarm", origin="lower",
+    im = ax.imshow(np.tile(w_data0[:-1, :-1], dupl), cmap="coolwarm", origin="lower",
                    animated=True, vmin=-5.0, vmax=5.0)
     
     black_cmap = ListedColormap([[0, 0, 0, 0], [0, 0, 0, 1]])
@@ -144,7 +144,7 @@ def wuv_periodic(frames_dir="dump"):
 
     def update(i):
         frame_num = available_frames_w[i]
-        w_arr = np.load(w_frame_dict[frame_num])
+        w_arr = np.load(w_frame_dict[frame_num])[:-1, :-1]
         m_arr = np.load(m_frame_dict[frame_num])
 
         im.set_array(np.tile(w_arr, dupl))

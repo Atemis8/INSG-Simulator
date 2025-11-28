@@ -1,6 +1,5 @@
 #pragma once
-#include "mesh.h"
-
+#include "../headers/mpi_domain.h"
 
 #define MEM_SIZE 200
 struct FishData;
@@ -16,14 +15,13 @@ typedef struct FishController {
 } FishController;
 
 typedef struct FishData {
+    MPIDomain* domain;
     double yfish;
     double xfish;
     double ufish;
     double vfish;
     double Lfish;
     
-    int nx;
-    int ny;
     double L;
     double H;
     double h;
@@ -39,7 +37,7 @@ void no_control(FishData* dat);
 void pid_control(FishData* dat);
 
 FishController* create_controller(double target, double start, void (*up) (FishData*));
-FishData initialize_body(double L, double H, double h, double dt, double Lfish, int nx, int ny,int mode);
+FishData initialize_body(MPIDomain *domain, double L, double H, double h, double dt, double Lfish, int mode);
 void compute_forces(FishData* data, VectorField* integ, int mode);
 void compute_speed_mask(FishData* fish, VectorField* out, double time);
 void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time);

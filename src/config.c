@@ -1,13 +1,13 @@
 #include "../headers/config.h"
 #include "../headers/mesh.h"
 #include "../headers/utils.h"
+#include "../headers/mpi_domain.h"
 
 #define min(a, b) (a) < (b) ? (a) : (b)
 #define max(a, b) (a) > (b) ? (a) : (b)
 
 // Default params assume r = 0.1, L = 1.0 and T = 1.0 N is the number of point in the x direction
-SimulationParams default_params(double N, double Re, double Lstar, double Hstar,int mode) {
-    // Params to choose 
+void default_params(SimulationParams *params, double N, double Re, double Lstar, double Hstar, int mode) {
     double L = 1.0;
     double T = 1.0;
     double r_max = 0.2;
@@ -20,47 +20,44 @@ SimulationParams default_params(double N, double Re, double Lstar, double Hstar,
     double nu = Lfish * Lfish / (Re * T);
 
     double dt_cfl = CFL_max * h / u_max_guess;
-    double dt_r = r_max * h * h / nu; 
+    double dt_r = r_max * h * h / nu;
 
-    mprintf("DT CFL : %.3e, DT R : %.3e \n", dt_cfl, dt_r);
+    params->domain = init_domain(N + 2, 3 + H / h, 1);
+    params->Re = Re;
+    params->num_epsiodes = 1000;
+    params->dump_period = 50;
+    params->nu = nu;
+    params->h = h;
+    params->dt = min(dt_cfl, dt_r);
+    params->dt = 5e-4;
+    params->dtau = params->dt / 1e4;
+    params->mode = mode;
 
-    double dt = min(dt_cfl, dt_r);
-    dt = 1e-3;
-
-    SimulationParams params = {
-        .Re = Re,
-        .num_epsiodes = 20000,
-        .dump_period = 50,
-        .nu = nu,
-        .h = h,
-        .dt = dt,
-        .dtau = dt / 1e4,
-        .mode = mode,
-        .body = initialize_body(L, H, h, dt, Lfish, N + 2, 3 + H / h, mode)
-    };
-    // params.body.xfish = 0.4 * L;
-    params.body.cont = create_controller(-0.05, 1.0, no_control);
-    return params;
+    params->body = initialize_body(&params->domain, L, H, h, params->dt, Lfish, mode);
+    params->body.cont = create_controller(-0.05, 1.0, no_control);
 }
 
-Simulation init_simulation(SimulationParams *params) {
-    MACMesh mesh = allocate_mesh(params->body.nx - 2, params->body.ny - 2, params->h);
-    Simulation sim = {
-        .params = params,
-        .mesh = mesh,
-        .Hn = vecfield_like(&(mesh.uv)),
-        .Hnm1 = vecfield_like(&(mesh.uv)),
-        .vstar = vecfield_like(&(mesh.uv)),
-        .vsn1 = vecfield_like(&(mesh.uv)),
-        .buffer = vecfield_like(&(mesh.uv)),
-        .phi = field_like(&mesh.P),
-        .mode = params->mode,
-        .t = 0.0
-    };
-    sim.vstar.u.type = 0;
-    sim.vstar.v.type = 1;
-    initialize_poisson_solver(&(sim.pdata), &(sim.phi), params->mode);
-    return sim;
+
+void init_simulation(Simulation *sim, SimulationParams *params, int argc, char **argv) {
+    MACMesh mesh = allocate_mesh(params->domain.tnx, params->domain.tny, params->h);
+    params->body.mask = allocate_vecfield(params->domain.tnx, params->domain.tny);
+    params->body.mask.u.type = 0;
+    params->body.mask.v.type = 1;
+
+    sim->params = params;
+    sim->mesh = mesh;
+    sim->Hn = vecfield_like(&(mesh.uv));
+    sim->Hnm1 = vecfield_like(&(mesh.uv));
+    sim->vstar = vecfield_like(&(mesh.uv));
+    sim->vsn1 = vecfield_like(&(mesh.uv));
+    sim->buffer = vecfield_like(&(mesh.uv));
+    sim->phi = field_like(&mesh.P);
+    sim->mode = params->mode;
+    sim->t = 0.0;
+    mprintf("tnx : %d, tny : %d, nx : %d, ny : %d\n", params->domain.tnx, params->domain.tny, params->domain.nx, params->domain.ny);
+    sim->vstar.u.type = 0;
+    sim->vstar.v.type = 1;
+    initialize_poisson_solver(&(sim->pdata), &(sim->phi), params->mode);
 }
 
 void free_simulation(Simulation* sim) {

@@ -6,12 +6,12 @@ HAS_MPI := $(shell which mpicc > /dev/null 2>&1 && echo 1 || echo 0)
 
 ifeq ($(HAS_MPI), 1)
     CC := mpicc
-    CFLAGS_MPI := -DUSE_MPI
-    $(info MPI detected: using mpicc)
+    CFLAGS_MPI := # -DUSE_MPI
+    # $(info MPI detected: using mpicc)
 else
     CC := gcc
     CFLAGS_MPI :=
-    $(info MPI not found: using gcc)
+    # $(info MPI not found: using gcc)
 endif
 
 # === Auto-detect OpenMP ===
@@ -21,11 +21,11 @@ HAS_OPENMP := $(shell echo 'int main(){return 0;}' | $(CC) -fopenmp -x c - -o /d
 ifeq ($(HAS_OPENMP), 1)
     CFLAGS_OMP := -fopenmp -DUSE_OPENMP
     LDFLAGS_OMP := -fopenmp
-    $(info OpenMP detected: enabling parallel support)
+    # $(info OpenMP detected: enabling parallel support)
 else
     CFLAGS_OMP :=
     LDFLAGS_OMP :=
-    $(info OpenMP not found: compiling without parallel support)
+    # $(info OpenMP not found: compiling without parallel support)
 endif
 
 # === Mode Configuration ===
@@ -75,8 +75,6 @@ ifeq ($(wildcard $(PETSC_DIR)/lib/petsc/conf/variables),)
     $(error "PETSc installation incomplete at $(PETSC_DIR). Missing conf/variables file")
 endif
 
-$(info Using PETSc from: $(PETSC_DIR))
-
 # Get PETSc variables (includes, libraries, etc.)
 include $(PETSC_DIR)/lib/petsc/conf/variables
 include $(PETSC_DIR)/lib/petsc/conf/rules
@@ -91,6 +89,8 @@ OBJECTS := $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SOURCES))
 
 # === Build Targets ===
 all: $(EXEC)
+
+.DEFAULT_GOAL := all
 
 $(EXEC): $(OBJECTS)
 	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
@@ -124,3 +124,9 @@ info:
 	@echo "LDFLAGS: $(LDFLAGS)"
 
 .PHONY: all run clean info
+
+# TO RUN MPI OFFLINE 
+# sudo ifconfig bridge0 up
+# sudo ifconfig bridge0 inet 10.0.0.1/24 add
+# ifconfig bridge0 => inet 10.0.0.1 netmask 0xffffff00
+#

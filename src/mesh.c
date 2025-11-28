@@ -148,8 +148,8 @@ void vec_norm(ScalarField *n, VectorField *f) {
         }
 }
 
-VectorField allocate_vecfield(int nxu, int nyu, int nxv, int nyv) {
-    return (VectorField) {.u = allocate_field(nxu, nyu), .v = allocate_field(nxv, nyv)};
+VectorField allocate_vecfield(int nx, int ny) {
+    return (VectorField) {.u = allocate_field(nx, ny), .v = allocate_field(nx, ny)};
 }
 
 VectorField vecfield_like(VectorField* f) {
@@ -189,7 +189,7 @@ void op_vecfieldwise_mul(VectorField *t, VectorField *s, double mul, SOP_SIG(op)
 We will add an additional ghost point that may seem strange 
 but it will greatly help with boundary conditions. Adding those 
 points will also allow for all fields to have the same size
-
+This means that the last line and last column of the vorticity field are not used
 v   -   v   -   v   -   v   -   v   -
 
 P   u   P   u   P   u   P   u   P   u
@@ -217,12 +217,11 @@ We choose the following axes :
 |----> x
 */
 MACMesh allocate_mesh(int nx, int ny, double h) {
-    nx += 2; ny += 2;  // Adds the ghost points
     MACMesh mesh = (MACMesh) {
         .P = allocate_field(nx, ny), 
-        .uv = allocate_vecfield(nx, ny, nx, ny),
-        .ubuff = allocate_vecfield(nx, ny, nx, ny),
-        .vbuff = allocate_vecfield(nx, ny, nx, ny),
+        .uv = allocate_vecfield(nx, ny),
+        .ubuff = allocate_vecfield(nx, ny),
+        .vbuff = allocate_vecfield(nx, ny),
         .h = h
     };
     mesh.uv.u.type = 0;

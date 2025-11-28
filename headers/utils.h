@@ -20,7 +20,6 @@ PostProcessor initialize_postprocessor(Simulation *m, const char* dir_path);
 
 // Save fields
 SimulationParams load_params(const char *dir);
-Simulation load_simulation(SimulationParams *params, const char *dir, int *ep_o);
 int initialize_dump(const char* dir_path);
 void mprintf(const char *fmt, ...);
 void save_fieldtxt(ScalarField *f, const char* file);

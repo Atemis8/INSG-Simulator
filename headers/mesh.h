@@ -53,7 +53,7 @@ typedef struct {
 } Vector;
 
 // Vecfield memory management
-VectorField allocate_vecfield(int nxu, int nyu, int nxv, int nyv);
+VectorField allocate_vecfield(int nx, int ny);
 VectorField vecfield_like(VectorField* vecf);
 void free_vecfield(VectorField *field);
 

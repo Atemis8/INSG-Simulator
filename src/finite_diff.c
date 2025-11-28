@@ -3,21 +3,6 @@
 #include "../headers/config.h"
 #include <assert.h>
 
-void interp_u(MACMesh *mesh, ScalarField *o) {
-    ScalarField *u = &(mesh->uv.u);
-    PARALLEL(2)
-    for(int x = 0; x < u->nx-1; ++x)
-        for(int y = 0; y < u->ny-1; ++y)
-            set_scal(o, x, y, (get_scal(u, x, y + 1) + get_scal(u, x, y)) / 2.0);
-}
-
-void interp_v(MACMesh *mesh, ScalarField *o) {
-    ScalarField *v = &(mesh->uv.v);
-    PARALLEL(2)
-    for(int x = 0; x < v->nx-1; ++x)
-        for(int y = 0; y < v->ny-1; ++y)
-            set_scal(o, x, y, (get_scal(v, x + 1, y) + get_scal(v, x, y)) / 2.0);
-}
 
 void grad_field(VectorField* o, ScalarField *i, double h, SOP_SIG(op_scal)) {
     ScalarField *dx = &o->u;
@@ -50,8 +35,9 @@ void divergence(ScalarField *o, VectorField *i, double h, SOP_SIG(op_scal)) {
     PARALLEL(2)
     for(int x = 1; x < u->nx-1; ++x) {
         for(int y = 1; y < u->ny-1; ++y) {
-            op_scal(o, x, y, (get_scal(u, x, y) - get_scal(u, x-1, y) 
-                        + get_scal(v, x, y) - get_scal(v, x, y-1)) / h);
+            op_scal(o, x, y, (
+                get_scal(u, x, y) - get_scal(u, x-1, y) 
+              + get_scal(v, x, y) - get_scal(v, x, y-1)) / h);
         }
     }
 }
@@ -149,8 +135,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
         }
     }
 }
-
-void update_ghost_points(VectorField *uv, MACMesh *mesh, int periodicityflag,double umesh,double dt) {
+void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, int periodicityflag,double umesh,double dt) {
 
     ScalarField *u = &(uv->u);
     ScalarField *v = &(uv->v);
@@ -191,9 +176,6 @@ void update_ghost_points(VectorField *uv, MACMesh *mesh, int periodicityflag,dou
     
     case M_BOUNDARY: // Not periodic
 
-        // double u0_bot = - 1./5. * (get_scal(u,x,3) - 5 *get_scal(u,x,2) + 15 * get_scal(u,x,1) - 16 * umesh);
-        // double u0_top = - 1./5. * (get_scal(u,x,u->ny-4) - 5 *get_scal(u,x,u->ny-3) + 15 * get_scal(u,x,u->ny-2) - 16 * umesh);
-        
         // Top and bottom conditions
         for (int x = 0; x < u->nx; x++) {
             set_scal(v, x, 0, 0.0);
@@ -213,8 +195,7 @@ void update_ghost_points(VectorField *uv, MACMesh *mesh, int periodicityflag,dou
             set_scal(u, x, u->ny - 1, get_scal(u, x, u->ny - 2));
         }
 
-        for (int y = 0; y < u->ny-1; y++) {
-                // calcul vstar+1,+1/2 avec vorticité 
+        for (int y = 0; y < u->ny-1; y++) { 
                 wn = ((get_scal(vn, vn->nx-1, y) - get_scal(vn, vn->nx-2, y)) - ((get_scal(un, un->nx-2, y+1) - get_scal(un, un->nx-2, y)))) / mesh->h;
                 wn1 =  ((get_scal(vn, vn->nx-2, y) - get_scal(vn, vn->nx-3, y)) - ((get_scal(un, un->nx-3, y+1) - get_scal(un, un->nx-3, y)))) / mesh->h;
                 w_star = wn  + umesh * dt * (wn - wn1) / mesh->h;

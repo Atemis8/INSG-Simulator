@@ -36,7 +36,7 @@ void test_grad_term(double Lx, double Ly, double h) {
     int ny = Ly / h;
 
     ScalarField P = allocate_field(nx, ny);
-    VectorField num = allocate_vecfield(nx, ny, nx, ny);
+    VectorField num = allocate_vecfield(nx, ny);
 
     for(int x = 0; x < nx; ++x)
         for(int y = 0; y < ny; ++y) {
@@ -71,14 +71,16 @@ void test_viscosity(double Lx, double Ly, double h) {
     if (fmod(Lx, h) != 0 || fmod(Ly, h) != 0) assert(0);
     int nx = Lx / h;
     int ny = Ly / h;
-
     MACMesh mesh = allocate_mesh(nx, ny, h);
+    mesh.uv.u.type = -1;
+    mesh.uv.v.type = -1;
     for(int x = 0; x < nx; ++x) 
         for(int y = 0; y < ny; ++y) {
             set_scal(&mesh.uv.u, x, y, sin_cos((x + 0.5) * h, y * h));
             set_scal(&mesh.uv.v, x, y, cos_sin(x * h, (y + 0.5) * h));
         }
-
+    mesh.uv.u.type = 0;
+    mesh.uv.v.type = 1;
     VectorField num = vecfield_like(&mesh.uv);
     viscosity_term(&mesh, &num, set_scal);
 
@@ -86,8 +88,8 @@ void test_viscosity(double Lx, double Ly, double h) {
     double errv_rms = 0.0;
     double maxu = 0.0;
     double maxv = 0.0;
-    for(int x = 1; x < nx - 1; ++x) 
-        for(int y = 1; y < ny - 1; ++y) {
+    for(int x = 1; x < nx - 2; ++x) 
+        for(int y = 1; y < ny - 2; ++y) {
             double erru = get_scal(&num.u, x, y) + 2 * sin_cos((x + 0.5) * h, y * h);
             if(maxu < fabs(erru)) maxu = fabs(erru);
             erru_rms += erru * erru;
@@ -96,7 +98,6 @@ void test_viscosity(double Lx, double Ly, double h) {
             if(maxv < fabs(errv)) maxv = fabs(errv);
             errv_rms += errv * errv;
         }
-
     mprintf("Viscosity -> erru : (%.3e, %.3e), errv : (%.3e, %.3e)\n", 
         sqrt(erru_rms) / ((nx - 2) * (ny - 2)), maxu,
         sqrt(errv_rms) / ((nx - 2) * (ny - 2)), maxv);
@@ -110,12 +111,16 @@ void test_convective(double Lx, double Ly, double h) {
     int nx = Lx / h;
     int ny = Ly / h;
     MACMesh mesh = allocate_mesh(nx, ny, h);
+    mesh.uv.u.type = -1;
+    mesh.uv.v.type = -1;
     for(int x = 0; x < nx; ++x) 
         for(int y = 0; y < ny; ++y) {
             set_scal(&mesh.uv.u, x, y, sin_cos((x + 0.5) * h, y * h));
             set_scal(&mesh.uv.v, x, y, -cos_sin(x * h, (y + 0.5) * h));
         }
-
+    
+    mesh.uv.u.type = 0;
+    mesh.uv.v.type = 1;
     VectorField num = vecfield_like(&mesh.uv);
 
     divergence_form(&mesh, &num, set_scal);
@@ -123,8 +128,8 @@ void test_convective(double Lx, double Ly, double h) {
     double errv_rms = 0.0;
     double maxu = 0.0;
     double maxv = 0.0;
-    for(int x = 1; x < nx - 1; ++x) 
-        for(int y = 1; y < ny - 1; ++y) {
+    for(int x = 1; x < nx - 2; ++x) 
+        for(int y = 1; y < ny - 2; ++y) {
             double erru = get_scal(&num.u, x, y) - (sin(2 * (x + 0.5) * h) * (cos(y * h) * cos(y * h) - 0.5 * cos(2 * y * h)));
             if(maxu < fabs(erru)) maxu = fabs(erru);
             erru_rms += erru * erru;
@@ -147,7 +152,7 @@ void test_divergence(double Lx, double Ly, double h) {
     if (fmod(Lx, h) != 0 || fmod(Ly, h) != 0) assert(0);
     int nx = Lx / h;
     int ny = Ly / h;
-    VectorField v = allocate_vecfield(nx, ny, nx, ny);
+    VectorField v = allocate_vecfield(nx, ny);
     for(int x = 0; x < nx; ++x) 
         for(int y = 0; y < ny; ++y) {
             set_scal(&v.u, x, y, sin_cos((x + 0.5) * h, y * h));
@@ -260,9 +265,10 @@ void test_poisson_solver(int N) {
     free_field(&phi);
 }
 
-void test_mpidomain(int argc, char **argv, int global_nx, int global_ny) {
-    MPIDomain domain = init_mpi(argc, argv, global_nx, global_ny);
+void test_mpidomain(int global_nx, int global_ny) {
+    MPIDomain domain = init_domain(global_nx, global_ny, 1);
     
+#ifdef USE_MPI
     if (domain.rank == 0) {
         printf("\n========================================\n");
         printf("MPI Ghost Cell Exchange Test\n");
@@ -314,4 +320,5 @@ void test_mpidomain(int argc, char **argv, int global_nx, int global_ny) {
 
         MPI_Barrier(MPI_COMM_WORLD);
     }
+#endif
 }

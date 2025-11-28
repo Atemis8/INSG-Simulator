@@ -1,10 +1,24 @@
 #pragma once
 
+#ifdef USE_MPI
 #include <mpi.h>
+#endif
 #include <stdbool.h>
 
+#ifndef MPI_PROC_NULL
+#define MPI_PROC_NULL -2
+#endif
+
+#include "../headers/mesh.h"
+
 typedef struct {
-    MPI_Comm cart_comm;      // Cartesian communicator
+
+#ifdef USE_MPI
+    MPI_Comm cart_comm;     // Cartesian communicator
+    MPI_Datatype x_slice;   // For north-south communication
+    MPI_Datatype y_slice;   // For east-west communication
+    MPI_Datatype corner;    // For coner communications
+#endif    
     int rank;                // Process rank in cart_comm
     int size;                // Total number of processes
     int dims[2];             // Grid dimensions [nx_procs, ny_procs]
@@ -24,14 +38,15 @@ typedef struct {
     
     // Starting indices in global domain
     int start_x, start_y;
-    
-    // MPI datatypes for communication
-    MPI_Datatype x_slice;  // For north-south communication
-    MPI_Datatype y_slice;  // For east-west communication
-    MPI_Datatype corner;
 } MPIDomain;
 
+
+// All finite difference operators need synchronization before being called
 int mpi_rank();
+void init_mpi(int argc, char *argv[]);
 void synchronize_cells(double *field, MPIDomain *domain);
+void synchronize_field(ScalarField *field, MPIDomain *domain);
+void synchronize_vecfield(VectorField *field, MPIDomain *domain);
 void print_field(double *field, MPIDomain *domain, const char *label);
-MPIDomain init_mpi(int argc, char *argv[], int global_nx, int global_ny);
+MPIDomain init_domain(int global_nx, int global_ny, int gw);
+

@@ -42,14 +42,14 @@ double lateral_displacement_dt(FishData* fish, double x, double t) {
 }
 
 double compute_fish_surface(FishData* fish) {
-    
+    int nx = fish->domain->nx;
     double Sfish = 0.0;
-    for (int x = 0; x < fish->nx; x++) {
+    for (int x = 0; x < nx; x++) {
         double xpos = (x - 0.5) * fish->h; // P centered grid
         double w = get_half_width(fish, xpos - fish->xfish);
         Sfish += w;
     }
-    Sfish *= 2 * fish->L / (fish->nx - 1);
+    Sfish *= 2 * fish->L / (nx - 1);
     return Sfish;
 }
 
@@ -114,7 +114,7 @@ FishController* create_controller(double target, double start, void (*up) (FishD
     return ctrl;
 }
 
-FishData initialize_body(double L, double H, double h, double dt, double Lfish, int nx, int ny,int mode) {
+FishData initialize_body(MPIDomain *domain, double L, double H, double h, double dt, double Lfish, int mode) {
     double x_fish;
     double y_fish;
     switch (mode) {
@@ -129,6 +129,7 @@ FishData initialize_body(double L, double H, double h, double dt, double Lfish, 
         break;
     }
     FishData data = (FishData) {
+        .domain = domain,
         .Lfish = Lfish,
         .xfish = x_fish,
         .yfish = y_fish,
@@ -136,16 +137,10 @@ FishData initialize_body(double L, double H, double h, double dt, double Lfish, 
         .H = H,
         .h = h,
         .dt = dt,
-        .nx = nx,
-        .ny = ny,
         .ufish = 0.0,
         .vfish = 0.0,
-        .mask = allocate_vecfield(nx, ny, nx, ny)
     };
-    data.mask.u.type = 0;
-    data.mask.v.type = 1;
     data.area = compute_fish_surface(&data);
-
     mprintf("Fish surface : %.3e\n", data.area);
 
     return data;
@@ -161,8 +156,8 @@ void compute_y_bounds(FishData* fish, double xpos, double time, double y_data[2]
 }
 
 void compute_speed_mask(FishData* fish, VectorField* out, double time) {
-    int nx = fish->nx;
-    int ny = fish->ny;
+    int nx = fish->domain->tnx;
+    int ny = fish->domain->tny;
     double L = fish->L;
     double xfish = fish->xfish;
     double Lfish = fish->Lfish;
@@ -210,8 +205,8 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
 }
 
 void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time) {
-    int nx = fish->nx;
-    int ny = fish->ny;
+    int nx = fish->domain->tnx;
+    int ny = fish->domain->tny;
     double L = fish->L;
     double h = fish->h;
     double xfish = fish->xfish;
@@ -278,7 +273,7 @@ void compute_forces(FishData* data, VectorField* integ, int mode) {
     if (data->xfish < -data->L) data->xfish += data->L;
     if (data->xfish > 2 * data->L) data->xfish -= data->L;
     
-    mprintf(" ufish : %.2f, vfish : %.2f ", data->ufish, data->vfish);
+    // mprintf(" ufish : %.2f, vfish : %.2f ", data->ufish, data->vfish);
     mprintf(" xfish : %.2f", data->xfish);
 }
 
