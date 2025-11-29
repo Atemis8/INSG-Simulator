@@ -16,11 +16,6 @@ typedef struct
 
 } DataSim;
 
-enum Mode {
-    M_PERIODIC,
-    M_BOUNDARY
-};
-
 typedef struct SimulationParams {
     MPIDomain domain;
     int num_epsiodes; // Number of simulation step
@@ -49,5 +44,5 @@ typedef struct Simulation {
 } Simulation;
 
 void init_simulation(Simulation *sim, SimulationParams *params, int argc, char *argv[]);
-void default_params(SimulationParams *params, double N, double Re, double Lstar, double Hstar,int mode);
+void default_params(SimulationParams *params, double N, double Re, double Lstar, double Hstar, Mode mode);
 void free_simulation(Simulation* sim);

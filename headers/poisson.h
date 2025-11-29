@@ -9,10 +9,6 @@ typedef struct {
     Vec x;
     KSP sles;
     int mode;
-#ifdef USE_MPI
-    Vec x_global;           // Global vector for gathering solution
-    VecScatter scatter_ctx;  // Scatter context for MPI communication
-#endif
 } Poisson_data;
 
 void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o);

@@ -266,8 +266,8 @@ void test_poisson_solver(int N) {
 }
 
 void test_mpidomain(int global_nx, int global_ny) {
-    MPIDomain domain = init_domain(global_nx, global_ny, 1);
-    
+    MPIDomain domain = init_domain(global_nx, global_ny, 1, M_PERIODIC);
+
 #ifdef USE_MPI
     if (domain.rank == 0) {
         printf("\n========================================\n");
@@ -280,7 +280,6 @@ void test_mpidomain(int global_nx, int global_ny) {
     // Allocate field
     int total_size = domain.tnx * domain.tny;
     double *field = (double*)malloc(total_size * sizeof(double));
-    
     // Initialize: all cells start as -1 (including ghosts and interior)
     for (int i = 0; i < total_size; i++) field[i] = -1.0;
     
@@ -295,8 +294,9 @@ void test_mpidomain(int global_nx, int global_ny) {
             field[xytok(x, y, domain.tny)] = global_x * 10.0 + global_y;
         }
     }
-    
+
     // Print BEFORE synchronization
+    
     MPI_Barrier(MPI_COMM_WORLD);
     for (int r = 0; r < domain.size; r++) {
         if (r == domain.rank) print_field(field, &domain, "BEFORE GHOST EXCHANGE");

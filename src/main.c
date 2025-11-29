@@ -40,20 +40,21 @@ void sim_step(Simulation *sim) {
 
     VectorField *buffer = &sim->buffer;
 
-    // Computation of the viscosity term
-    // synchronize_vecfield(&mesh->uv, domain);
+    // Computation of the viscosity term (on the u and v centers)
+    synchronize_vecfield(&mesh->uv, domain);
     viscosity_term(mesh, vstar, set_scal);
     op_vecfield(vstar, dt * sim->params->nu, mul_scal);
 
-    // Computation of the gradient term
-    // synchronize_field(&mesh->P, domain);
+    // Computation of the gradient term (on the u and v centers)
+    synchronize_field(&mesh->P, domain);
     grad_field(buffer, &(mesh->P), mesh->h, set_scal);
     op_vecfieldwise_mul(vstar, buffer, dt, sub_scal);
 
     // Computation of convective term
     if (sim->mode == M_BOUNDARY) mesh->vmesh.x = body->ufish;
     
-    // synchronize_vecfield(&mesh->uv, domain);
+    // Computes the divergence field (on the u and v centers)
+    synchronize_vecfield(&mesh->uv, domain);
     divergence_form(mesh, Hn, set_scal);
     op_vecfieldwise_mul(Hnm1, Hn, 3, sub_scal);
     op_vecfieldwise_mul(vstar, Hnm1, 0.5 * dt, add_scal);
@@ -63,7 +64,7 @@ void sim_step(Simulation *sim) {
     compute_speed_mask(body, vsn1, sim->t);
     op_vecfieldwise(vstar, &mesh->uv, add_scal);
 
-    // Adds Penalization terms
+    // Adds Penalization terms (at the u and v centers)
     op_vecfield(&body->mask, dt / dtau, mul_scal);
     op_vecfieldwise(vsn1, &body->mask, mul_scal);
     op_vecfieldwise(vstar, vsn1, add_scal);
@@ -75,14 +76,16 @@ void sim_step(Simulation *sim) {
     
     update_ghost_points(domain, vstar, mesh, sim->mode,body->ufish,dt);
 
-    // Compute the poisson problem 
-    // synchronize_vecfield(vstar, domain);
+    // Compute the divergence of vstar (at the P centers)
+    synchronize_vecfield(vstar, domain);
     divergence(phi, vstar, mesh->h, set_scal);
     poisson_solver(&(sim->pdata), phi, phi);
 
     op_field(phi, mesh->h * mesh->h, mul_scal);
     op_vecfieldwise(&(mesh->uv), vstar, set_scal);
-    // synchronize_field(phi, domain);
+
+    // Make the field divergence free
+    synchronize_field(phi, domain);
     grad_field(&(mesh->uv), phi, mesh->h, sub_scal);
 
     // Computes forces on the fish
@@ -111,6 +114,11 @@ int main(int argc, char *argv[]) {
     }
 
     init_mpi(argc, argv);
+    /*
+    test_mpidomain(16, 16);
+    MPI_Finalize();
+    exit(0);
+    */
     PetscInitialize(&argc, &argv, 0, 0);
     
     if (testing) {
@@ -129,7 +137,6 @@ int main(int argc, char *argv[]) {
             test_divergence(1.0, 1.0, 1.0 / (1ULL << 8));
 
         }
-        test_mpidomain(16, 16);
         test_poisson_solver(100);
     }
 

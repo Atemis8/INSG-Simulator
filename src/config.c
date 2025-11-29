@@ -7,7 +7,7 @@
 #define max(a, b) (a) > (b) ? (a) : (b)
 
 // Default params assume r = 0.1, L = 1.0 and T = 1.0 N is the number of point in the x direction
-void default_params(SimulationParams *params, double N, double Re, double Lstar, double Hstar, int mode) {
+void default_params(SimulationParams *params, double N, double Re, double Lstar, double Hstar, Mode mode) {
     double L = 1.0;
     double T = 1.0;
     double r_max = 0.2;
@@ -22,7 +22,7 @@ void default_params(SimulationParams *params, double N, double Re, double Lstar,
     double dt_cfl = CFL_max * h / u_max_guess;
     double dt_r = r_max * h * h / nu;
 
-    params->domain = init_domain(N + 2, 3 + H / h, 1);
+    params->domain = init_domain(N + 2, 3 + H / h, 1, mode);
     params->Re = Re;
     params->num_epsiodes = 1000;
     params->dump_period = 50;

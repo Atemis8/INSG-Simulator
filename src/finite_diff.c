@@ -4,6 +4,9 @@
 #include <assert.h>
 
 
+/*
+Uses values of the scalar field from 0 to nx-1 and ny-1 (entire field)
+*/
 void grad_field(VectorField* o, ScalarField *i, double h, SOP_SIG(op_scal)) {
     ScalarField *dx = &o->u;
     ScalarField *dy = &o->v;
@@ -78,7 +81,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
 
     Vector *vmesh = &(mesh->vmesh);
 
-    // Compute u(u-u0)_{x, y} from u_{x+1/2,y}
+    // Compute u(u-u0)_{x, y} from u_{x+1/2,y} (pressure centers)
     PARALLEL(2)
     for(int x = 1; x < uu->nx-1; ++x) {
         for(int y = 0; y < uu->ny; ++y) {
@@ -87,7 +90,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
         }
     }
 
-    // Compute vv_{x, y} from v_{x, y+1/2}
+    // Compute vv_{x, y} from v_{x, y+1/2} (pressure centers)
     PARALLEL(2)
     for(int x = 0; x < vv->nx; ++x) { 
         for(int y = 1; y < vv->ny-1; ++y) {
@@ -96,7 +99,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
         }
     }
 
-    // Computes uv_{x+1/2, y+1/2} from u_{x+1/2, y} and v_{x, y+1/2}
+    // Computes uv_{x+1/2, y+1/2} from u_{x+1/2, y} and v_{x, y+1/2} (vorticity center)
     PARALLEL(2)
     for(int x = 0; x < uv->nx-1; ++x) {
         for(int y = 0; y < uv->ny-1; ++y) {
@@ -106,6 +109,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
         }
     }
 
+    // Computes vu_{x+1/2, y+1/2} at the vorticity centers (computations coule be avoided if no vmesh)
     PARALLEL(2)
     for(int x = 0; x < vu->nx-1; ++x) {
         for(int y = 0; y < vu->ny-1; ++y) {
@@ -115,7 +119,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
         }
     }
 
-    // Computes a_{x+1/2, y} from uu_{x, y} and uv_{x+1/2, y+1/2}
+    // Computes a_{x+1/2, y} from uu_{x, y} and uv_{x+1/2, y+1/2} (at the u centers)
     PARALLEL(2)
     for(int x = 1; x < a->nx-1; ++x) {
         for(int y = 1; y < a->ny-1; ++y) {
@@ -125,7 +129,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
         }
     }
 
-    // Computes b_{x, y+1/2} from vv_{x, y} and uv_{x+1/2, y+1/2}
+    // Computes b_{x, y+1/2} from vv_{x, y} and uv_{x+1/2, y+1/2} (at the v centers)
     PARALLEL(2)
     for(int x = 1; x < b->nx-1; ++x) {
         for(int y = 1; y < b->ny-1; ++y) {
@@ -135,7 +139,7 @@ void divergence_form(MACMesh *mesh, VectorField *ab, SOP_SIG(op_scal)) {
         }
     }
 }
-void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, int periodicityflag,double umesh,double dt) {
+void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, Mode periodicityflag, double umesh, double dt) {
 
     ScalarField *u = &(uv->u);
     ScalarField *v = &(uv->v);
@@ -150,18 +154,26 @@ void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, int 
     switch (periodicityflag) {
     case M_PERIODIC: // Periodic
 
-        // Top and bottom u rows
-        for (int x = 0; x < u->nx-1; x++) {
+        // Top and bottom u rows from interior of the domain
+        // Sets the row 0    of u from row ny-2
+        // Sets the row ny-1 of u from row 1
+        // Sets the y=n-2 row of v from y=0 row
+        // Make a MPI swap row function 
+    #ifdef USE_MPI
+        if(domain->dims[1] == 1) {
+    #endif
+        for (int x = 0; x < u->nx-1; ++x) {
             set_scal(u, x, 0, get_scal(u, x, u->ny - 2));
             set_scal(u, x, u->ny - 1, get_scal(u, x, 1));
         }
 
-        // Top v row from bottom v row
         for (int x = 0; x < v->nx; x++) { 
             set_scal(v, x, v->ny - 2, get_scal(v, x, 0));
         }
-
-        // 
+    #ifdef USE_MPI
+        } if(domain->dims[0] == 1) {
+    #endif
+        // West and East v rows from interior of domain
         for (int y = 0; y < u->ny-1; y++) {
             set_scal(v, 0, y, get_scal(v, v->nx - 2, y));
             set_scal(v, v->nx-1, y, get_scal(v, 1, y));
@@ -171,7 +183,9 @@ void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, int 
         for (int y = 0; y < u->ny; y++) {
             set_scal(u, u->nx-2, y, get_scal(u, 0, y));
         }
-        
+    #ifdef USE_MPI
+        }
+    #endif
         break;
     
     case M_BOUNDARY: // Not periodic

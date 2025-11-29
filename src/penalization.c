@@ -257,7 +257,7 @@ void compute_forces(FishData* data, VectorField* integ, int mode) {
             if(maxv < fabs(v)) maxv = fabs(v);
             Iv += v * h * h;
         }
-
+    mprintf(" au : %.3e, av : %.3e, ", Iu / data->area, Iv / data->area);
     data->ufish += Iu / data->area;
     if (mode == M_BOUNDARY) data->vfish = 0;
     if (mode == M_PERIODIC){

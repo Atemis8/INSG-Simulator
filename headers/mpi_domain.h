@@ -1,5 +1,6 @@
 #pragma once
 
+// #define USE_MPI
 #ifdef USE_MPI
 #include <mpi.h>
 #endif
@@ -10,6 +11,18 @@
 #endif
 
 #include "../headers/mesh.h"
+
+typedef enum Direction {
+    NORTH,
+    EAST,
+    SOUTH, 
+    WEST
+} Direction;
+
+typedef enum Mode {
+    M_PERIODIC,
+    M_BOUNDARY
+} Mode;
 
 typedef struct {
 
@@ -48,5 +61,5 @@ void synchronize_cells(double *field, MPIDomain *domain);
 void synchronize_field(ScalarField *field, MPIDomain *domain);
 void synchronize_vecfield(VectorField *field, MPIDomain *domain);
 void print_field(double *field, MPIDomain *domain, const char *label);
-MPIDomain init_domain(int global_nx, int global_ny, int gw);
+MPIDomain init_domain(int global_nx, int global_ny, int gw, Mode mode);
 

@@ -72,28 +72,6 @@ void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
     }
 
     VecRestoreArray(x, &sol);
-    
-#ifdef USE_MPI
-    // Gather the complete solution to all ranks
-    // This is necessary because your ScalarField is replicated on all ranks
-    PetscScalar *global_sol;
-
-    /* scatter from distributed x to sequential x_global */
-    VecScatterBegin(data->scatter_ctx, x, data->x_global, INSERT_VALUES, SCATTER_FORWARD);
-    VecScatterEnd(data->scatter_ctx, x, data->x_global, INSERT_VALUES, SCATTER_FORWARD);
-
-    /* access the gathered vector */
-    VecGetArray(data->x_global, &global_sol);
-
-    for(int x = 1; x < nx-1; ++x) {
-        for(int y = 1; y < ny-1; ++y) {
-            int idx = ((y-1) * (nx-2)) + (x-1);
-            set_scal(o, x, y, global_sol[idx]);
-        }
-    }
-
-    VecRestoreArray(data->x_global, &global_sol);
-#endif
 
     // Set boundary values
     switch(data->mode) {
@@ -246,14 +224,6 @@ PetscErrorCode initialize_poisson_solver(Poisson_data *data, ScalarField* o, int
     ierr = VecSetSizes(data->x, PETSC_DECIDE, nphi); CHKERRQ(ierr);
     ierr = VecSetFromOptions(data->x); CHKERRQ(ierr);
 
-#ifdef USE_MPI
-    /* Create global vector for gathering results */
-    ierr = VecCreateSeq(PETSC_COMM_SELF, nphi, &(data->x_global)); CHKERRQ(ierr);
-    
-    /* Create scatter context for gathering */
-    ierr = VecScatterCreateToAll(data->x, &(data->scatter_ctx), &(data->x_global)); CHKERRQ(ierr);
-#endif
-
     /* Create and assemble the Laplacian matrix : A  */
     ierr = MatCreate(PETSC_COMM_WORLD, &(data->A)); CHKERRQ(ierr);
     ierr = MatSetSizes(data->A, PETSC_DECIDE, PETSC_DECIDE, nphi, nphi); CHKERRQ(ierr);
@@ -280,19 +250,12 @@ PetscErrorCode initialize_poisson_solver(Poisson_data *data, ScalarField* o, int
     /* Create the Krylov context */
     ierr = KSPCreate(PETSC_COMM_WORLD, &(data->sles)); CHKERRQ(ierr);
     ierr = KSPSetOperators(data->sles, data->A, data->A); CHKERRQ(ierr);
-    ierr = KSPSetType(data->sles, KSPGMRES); CHKERRQ(ierr);
+    ierr = KSPSetType(data->sles, KSPCG); CHKERRQ(ierr);
     
     PC prec;
     ierr = KSPGetPC(data->sles, &prec); CHKERRQ(ierr);
-    
-#ifdef USE_MPI
-    ierr = PCSetType(prec, PCASM); CHKERRQ(ierr);
-    ierr = KSPSetTolerances(data->sles, 1.e-12, 1e-12, PETSC_DEFAULT, 1000); CHKERRQ(ierr);
-#else
-    ierr = PCSetType(prec, PCLU); CHKERRQ(ierr);
+    ierr = PCSetType(prec, PCGAMG); CHKERRQ(ierr);
     ierr = KSPSetTolerances(data->sles, 1.e-12, 1e-12, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
-#endif
-    
     ierr = KSPSetReusePreconditioner(data->sles, PETSC_TRUE); CHKERRQ(ierr);
     ierr = KSPSetUseFischerGuess(data->sles, 1, 4); CHKERRQ(ierr);
     ierr = KSPGMRESSetPreAllocateVectors(data->sles); CHKERRQ(ierr);
@@ -309,8 +272,4 @@ void free_poisson_solver(Poisson_data *data) {
     VecDestroy(&(data->b));
     VecDestroy(&(data->x));
     KSPDestroy(&(data->sles));
-#ifdef USE_MPI
-    VecDestroy(&(data->x_global));
-    VecScatterDestroy(&(data->scatter_ctx));
-#endif
 }
