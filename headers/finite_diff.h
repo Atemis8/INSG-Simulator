@@ -18,3 +18,4 @@ void grad_field(VectorField* o, ScalarField *i, double h, SOP_SIG(op_scal));
 
 void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, Mode periodicityflag, double umesh, double dt);
 void bc_outflow(MACMesh *mesh, VectorField *vstar,double umesh,double dt); // update vstar for natural outflow
+void apply_periodic_bc(ScalarField *s);

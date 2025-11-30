@@ -165,7 +165,9 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
 
     op_vecfield(mask, 0.0, set_scal);
     op_vecfield(out, 0.0, set_scal);
-    for (int x = 0; x < nx - 2; x++) {
+    // Computes mask in [0, nx-2]x[1, ny-2]
+    // Computes vsn1 in [0, nx-2]x[1, ny-2]
+    for (int x = 1; x < nx-2; x++) {
         for(int shiftx = -1; shiftx <= 1; ++shiftx) { 
             double bounds_u[2];
             double xpos_u = xforu(x, fish->h) + shiftx * L;
@@ -183,6 +185,7 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
         }
     }
 
+
     for (int x = 1; x < nx - 1; x++) {
         for(int shiftx = -1; shiftx <= 1; ++shiftx) { 
 
@@ -192,7 +195,7 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
             double dym = lateral_displacement_dt(fish, xpos_v - fish->xfish, time);
 
             if(xpos_v >= xfish && xpos_v <= xfish + Lfish) {
-                for (int y = 0; y < ny - 2; y++) {
+                for (int y = 1; y < ny-2; y++) {
                     double ypos_v = yforv(y, fish->h);
                     if (ypos_v >= bounds_v[0] && ypos_v <= bounds_v[1]) {
                         set_scal(&out->v, x, y, dym + fish->vfish);

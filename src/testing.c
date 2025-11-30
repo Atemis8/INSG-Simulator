@@ -38,34 +38,57 @@ void test_grad_term(double Lx, double Ly, double h) {
     ScalarField P = allocate_field(nx, ny);
     VectorField num = allocate_vecfield(nx, ny);
 
-    for(int x = 0; x < nx; ++x)
-        for(int y = 0; y < ny; ++y) {
+    // Fill pressure at cell centers
+    for (int x = 0; x < nx; ++x)
+        for (int y = 0; y < ny; ++y)
             set_scal(&P, x, y, sin_cos(x * h, y * h));
-        }
+
     grad_field(&num, &P, h, set_scal);
 
-    double erru_rms = 0.0;
-    double errv_rms = 0.0;
-    double maxu = 0.0;
-    double maxv = 0.0;
-    for(int x = 0; x < nx-1; ++x) 
-        for(int y = 0; y < ny-1; ++y) {
-            double erru = get_scal(&num.u, x, y) - cos((x + 0.5) * h) * cos(y * h);
-            if(maxu < fabs(erru)) maxu = fabs(erru);
-            erru_rms += erru * erru;
+    double erru_rms = 0.0, errv_rms = 0.0;
+    double maxu = 0.0, maxv = 0.0;
+    int cntu = 0, cntv = 0;
 
-            double errv = get_scal(&num.v, x, y) + sin(x * h) * sin((y + 0.5) * h);
-            if(maxv < fabs(errv)) maxv = fabs(errv);
-            errv_rms += errv * errv;
+    // ---- u-component: P_x forward diff ----
+    // u is defined at (x+0.5, y)
+    for (int x = 1; x < nx - 2; ++x)
+        for (int y = 1; y < ny - 1; ++y) {
+            double xc = (x + 0.5) * h;
+            double yc = y * h;
+
+            double ref = cos(xc) * cos(yc);
+            double numu = get_scal(&num.u, x, y);
+            double err = numu - ref;
+
+            erru_rms += err * err;
+            if (fabs(err) > maxu) maxu = fabs(err);
+            cntu++;
         }
 
-    mprintf("Pressure -> erru : (%.3e, %.3e); errv : (%.3e, %.3e)\n", 
-        sqrt(erru_rms) / ((nx - 1) * (ny - 1)), maxu, 
-        sqrt(errv_rms) / ((nx - 1) * (ny - 1)), maxv);
-    
+    // ---- v-component: P_y forward diff ----
+    // v is defined at (x, y+0.5)
+    for (int x = 1; x < nx - 1; ++x)
+        for (int y = 1; y < ny - 2; ++y) {
+            double xc = x * h;
+            double yc = (y + 0.5) * h;
+
+            double ref = -sin(xc) * sin(yc);
+            double numv = get_scal(&num.v, x, y);
+            double err = numv - ref;
+
+            errv_rms += err * err;
+            if (fabs(err) > maxv) maxv = fabs(err);
+            cntv++;
+        }
+
+    mprintf("Pressure -> erru : (%.3e, %.3e); errv : (%.3e, %.3e)\n",
+            sqrt(erru_rms / cntu), maxu,
+            sqrt(errv_rms / cntv), maxv);
+
     free_field(&P);
     free_vecfield(&num);
 }
+
 
 void test_viscosity(double Lx, double Ly, double h) {
     if (fmod(Lx, h) != 0 || fmod(Ly, h) != 0) assert(0);
@@ -238,8 +261,8 @@ void test_poisson_solver(int N) {
     int gw = domain.ghost_width;
     for (int x = 0; x < domain.nx; ++x) {
         for (int y = 0; y < domain.ny; ++y) {
-            int xval = (domain.start_x + x) * h;
-            int yval = (domain.start_y + y) * h;
+            double xval = (domain.start_x + x) * h;
+            double yval = (domain.start_y + y) * h;
             
             double val = -2.0 * M_PI * M_PI * sin(M_PI * xval) * sin(M_PI * yval);
             set_scal(&phi, x + gw, y + gw, val);
@@ -266,8 +289,8 @@ void test_poisson_solver(int N) {
     // Check all cells for error computation
     for (int x = 0; x < domain.tnx; ++x) {
         for (int y = 0; y < domain.tny; ++y) {
-            int xval = (domain.start_x + (x - gw)) * h;
-            int yval = (domain.start_y + (y - gw)) * h;
+            double xval = (domain.start_x + (x - gw)) * h;
+            double yval = (domain.start_y + (y - gw)) * h;
             
             double analytical = sin(M_PI * xval) * sin(M_PI * yval);
             double numerical = get_scal(&phi, x, y);

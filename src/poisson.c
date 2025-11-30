@@ -1,6 +1,7 @@
 #include "../headers/poisson.h"
 #include "../headers/utils.h"
 #include "../headers/config.h"
+#include "../headers/finite_diff.h"
 
 #ifdef USE_MPI
 #include <mpi.h>
@@ -11,55 +12,50 @@
 void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain) {
     PetscScalar **array;
     PetscInt i, j, xs, ys, xm, ym;
-    
+
     DMDAVecGetArray(da, b, &array);
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
-    
+
     int gw = domain->ghost_width;
-    
-    // Fill local portion of RHS
+
+    /* Fill local portion of RHS: loop over DMDA global indices (xs..xs+xm-1) */
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
-            // Convert DMDA global indices to local ScalarField indices
-            // DMDA uses 0-based global indexing
-            // ScalarField uses local indexing with ghosts: [0...gw-1][gw...gw+nx-1][gw+nx...tnx-1]
-            
-            int local_x = (i - domain->start_x) + gw;  // Map to local interior + ghost offset
-            int local_y = (j - domain->start_y) + gw;
-            
+            /* Map DMDA (global) index (i,j) -> local ScalarField index (with gw) */
+            int local_x = (int)(i - xs) + gw;
+            int local_y = (int)(j - ys) + gw;
+
+
             array[j][i] = get_scal(f, local_x, local_y);
         }
     }
-    
-    // Special handling for boundary mode: pin first point to zero
-    if (xs == 0 && ys == 0 && mode == M_BOUNDARY) {
-        array[0][0] = 0.0;
-    }
-    
+
     DMDAVecRestoreArray(da, b, &array);
 }
+
 
 void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
     PetscScalar **array;
     PetscInt i, j, xs, ys, xm, ym;
-    
+
     DMDAVecGetArray(da, x, &array);
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
-    
+
     int gw = domain->ghost_width;
-    
-    // Extract local portion of solution
+
+    /* Extract local portion of solution */
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
-            // Convert DMDA global indices to local ScalarField indices
-            int local_x = (i - domain->start_x) + gw;
-            int local_y = (j - domain->start_y) + gw;
-            
+            /* Map DMDA global index to local field index */
+            int local_x = (int)(i - xs) + gw;
+            int local_y = (int)(j - ys) + gw;
+
             set_scal(o, local_x, local_y, array[j][i]);
         }
     }
-    
+
     DMDAVecRestoreArray(da, x, &array);
+
 }
 
 /*
@@ -103,78 +99,6 @@ void computeLaplacianMatrix_DMDA(Mat A, DM da, ScalarField *f, int flagtype) {
             }
         }
         break;
-        
-    case M_BOUNDARY:
-        // Boundary conditions: Neumann on most boundaries, Dirichlet at one point
-        for (j = ys; j < ys + ym; j++) {
-            for (i = xs; i < xs + xm; i++) {
-                row.i = i; row.j = j;
-                ncols = 0;
-                
-                // Special case: bottom-left corner (Dirichlet point to fix constant)
-                if (i == 0 && j == 0) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = 1.0;
-                }
-                // Bottom-right corner
-                else if (i == nx - 1 && j == 0) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -2.0;
-                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
-                }
-                // Top-left corner
-                else if (i == 0 && j == ny - 1) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -2.0;
-                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                }
-                // Top-right corner
-                else if (i == nx - 1 && j == ny - 1) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -2.0;
-                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                }
-                // Bottom edge (not corners)
-                else if (j == 0) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
-                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
-                }
-                // Top edge (not corners)
-                else if (j == ny - 1) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
-                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                }
-                // Left edge (not corners)
-                else if (i == 0) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
-                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
-                }
-                // Right edge (not corners)
-                else if (i == nx - 1) {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
-                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
-                }
-                // Interior points
-                else {
-                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -4.0;
-                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
-                }
-                
-                MatSetValuesStencil(A, 1, &row, ncols, col, v, INSERT_VALUES);
-            }
-        }
-        break;
-        
     default:
         mprintf("Error: Unknown flagtype in computeLaplacianMatrix_DMDA\n");
         break;
@@ -214,64 +138,7 @@ void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
     
     /* Extract solution to ScalarField */
     extractSolution_DMDA(data->x, data->da, o, data->domain);
-    
-    /* Set ghost cell values based on boundary conditions */
-
-     PetscInt nx = data->domain->tnx;  // total including ghosts
-    PetscInt ny = data->domain->tny;
-    int gw = data->domain->ghost_width;
-
-    switch (data->mode) {
-
-    case M_BOUNDARY:
-        /* Neumann BCs: ghost = interior */
-
-        /* Corners */
-        set_scal(o, gw-1,     gw-1,     get_scal(o, gw,     gw));
-        set_scal(o, nx-gw,    gw-1,     get_scal(o, nx-gw-1,gw));
-        set_scal(o, gw-1,     ny-gw,    get_scal(o, gw,     ny-gw-1));
-        set_scal(o, nx-gw,    ny-gw,    get_scal(o, nx-gw-1,ny-gw-1));
-
-        /* Bottom and top boundaries */
-        for (int x = gw; x < nx-gw; x++) {
-            set_scal(o, x, gw-1,     get_scal(o, x, gw));
-            set_scal(o, x, ny-gw,    get_scal(o, x, ny-gw-1));
-        }
-
-        /* Left and right boundaries */
-        for (int y = gw; y < ny-gw; y++) {
-            set_scal(o, gw-1,    y, get_scal(o, gw,      y));
-            set_scal(o, nx-gw,   y, get_scal(o, nx-gw-1, y));
-        }
-
-        break;
-
-
-    case M_PERIODIC:
-        /* Periodic BCs: wrap ghost cells */
-
-        /* Left/right periodic */
-        for (int y = gw; y < ny-gw; y++) {
-            // left ghosts
-            for (int k = 0; k < gw; k++)
-                set_scal(o, k, y, get_scal(o, nx-2*gw + k, y));
-
-            // right ghosts
-            for (int k = 0; k < gw; k++)
-                set_scal(o, nx-gw + k, y, get_scal(o, gw + k, y));
-        }
-
-        /* Top/bottom periodic */
-        for (int x = 0; x < nx; x++) {
-            for (int k = 0; k < gw; k++)
-                set_scal(o, x, k,          get_scal(o, x, ny-2*gw + k));
-            for (int k = 0; k < gw; k++)
-                set_scal(o, x, ny-gw + k,  get_scal(o, x, gw + k));
-        }
-
-        break;
-    }
-    
+    apply_periodic_bc(o);
 }
 
 /*
