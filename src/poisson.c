@@ -12,50 +12,49 @@
 void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain) {
     PetscScalar **array;
     PetscInt i, j, xs, ys, xm, ym;
-
+    
     DMDAVecGetArray(da, b, &array);
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
-
+    
     int gw = domain->ghost_width;
-
-    /* Fill local portion of RHS: loop over DMDA global indices (xs..xs+xm-1) */
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
-            /* Map DMDA (global) index (i,j) -> local ScalarField index (with gw) */
-            int local_x = (int)(i - xs) + gw;
-            int local_y = (int)(j - ys) + gw;
-
-
+            int local_x = (i - domain->start_x) + gw;  // Map to local interior + ghost offset
+            int local_y = (j - domain->start_y) + gw;
+            
             array[j][i] = get_scal(f, local_x, local_y);
         }
     }
-
+    
+    // Special handling for boundary mode: pin first point to zero
+    if (xs == 0 && ys == 0 && mode == M_BOUNDARY) {
+        array[0][0] = 0.0;
+    }
+    
     DMDAVecRestoreArray(da, b, &array);
 }
-
 
 void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
     PetscScalar **array;
     PetscInt i, j, xs, ys, xm, ym;
-
+    
     DMDAVecGetArray(da, x, &array);
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
-
+    
     int gw = domain->ghost_width;
-
-    /* Extract local portion of solution */
+    
+    // Extract local portion of solution
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
-            /* Map DMDA global index to local field index */
-            int local_x = (int)(i - xs) + gw;
-            int local_y = (int)(j - ys) + gw;
-
+            // Convert DMDA global indices to local ScalarField indices
+            int local_x = (i - domain->start_x) + gw;
+            int local_y = (j - domain->start_y) + gw;
+            
             set_scal(o, local_x, local_y, array[j][i]);
         }
     }
-
+    
     DMDAVecRestoreArray(da, x, &array);
-
 }
 
 /*
@@ -82,17 +81,9 @@ void computeLaplacianMatrix_DMDA(Mat A, DM da, ScalarField *f, int flagtype) {
                 
                 // Center: -4
                 col[ncols].i = i; col[ncols].j = j; v[ncols++] = -4.0;
-                
-                // West: +1
                 col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                
-                // East: +1
                 col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
-                
-                // South: +1
                 col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                
-                // North: +1
                 col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
                 
                 MatSetValuesStencil(A, 1, &row, ncols, col, v, INSERT_VALUES);

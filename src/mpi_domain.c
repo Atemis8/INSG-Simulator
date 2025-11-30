@@ -2,7 +2,9 @@
 #include "../headers/utils.h"
 
 int rank = 0;
+int size = 1;
 int mpi_rank() {return rank;}
+int mpi_size() {return size;}
 
 // MPI Helper functions
 #ifdef USE_MPI
@@ -12,6 +14,7 @@ void init_mpi(int argc, char *argv[]) {
     MPI_Initialized(&mpi_initialized);
     if (!mpi_initialized) MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 }
 
 int MPI_Cart_shift_nd(

@@ -389,3 +389,225 @@ void test_mpidomain(int global_nx, int global_ny) {
     }
 #endif
 }
+
+#ifdef USE_MPI
+/*
+ * MPI-IO Diagnostic Test
+ * Compile: mpicc -o mpi_io_test mpi_io_test.c
+ * Run: mpirun -np 4 ./mpi_io_test
+ */
+
+#include <mpi.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+void test_basic_collectives(int rank, int size) {
+    printf("Rank %d: Testing basic collectives...\n", rank);
+    fflush(stdout);
+    
+    // Test 1: Barrier
+    printf("Rank %d: Before barrier\n", rank);
+    fflush(stdout);
+    MPI_Barrier(MPI_COMM_WORLD);
+    printf("Rank %d: After barrier\n", rank);
+    fflush(stdout);
+    
+    // Test 2: Broadcast
+    int data = (rank == 0) ? 42 : 0;
+    printf("Rank %d: Before bcast (data=%d)\n", rank, data);
+    fflush(stdout);
+    MPI_Bcast(&data, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    printf("Rank %d: After bcast (data=%d)\n", rank, data);
+    fflush(stdout);
+    
+    // Test 3: Allreduce
+    int local_val = rank + 1;
+    int global_sum = 0;
+    printf("Rank %d: Before allreduce (local=%d)\n", rank, local_val);
+    fflush(stdout);
+    MPI_Allreduce(&local_val, &global_sum, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    printf("Rank %d: After allreduce (sum=%d)\n", rank, global_sum);
+    fflush(stdout);
+    
+    if (rank == 0) printf("\n=== Basic collectives: PASSED ===\n\n");
+}
+
+void test_mpi_file_open(int rank, int size) {
+    printf("Rank %d: Testing MPI_File_open...\n", rank);
+    fflush(stdout);
+    
+    MPI_File fh;
+    const char *filename = "test_mpi_io.dat";
+    
+    // Add explicit barrier before file open
+    printf("Rank %d: Barrier before MPI_File_open\n", rank);
+    fflush(stdout);
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    printf("Rank %d: Calling MPI_File_open...\n", rank);
+    fflush(stdout);
+    
+    double t_start = MPI_Wtime();
+    int ret = MPI_File_open(MPI_COMM_WORLD, filename,
+                           MPI_MODE_CREATE | MPI_MODE_WRONLY,
+                           MPI_INFO_NULL, &fh);
+    double t_elapsed = MPI_Wtime() - t_start;
+    
+    if (ret != MPI_SUCCESS) {
+        char error_string[MPI_MAX_ERROR_STRING];
+        int length;
+        MPI_Error_string(ret, error_string, &length);
+        fprintf(stderr, "Rank %d: MPI_File_open FAILED after %.6f s: %s\n", 
+                rank, t_elapsed, error_string);
+        fflush(stderr);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    
+    printf("Rank %d: MPI_File_open SUCCESS after %.6f s\n", rank, t_elapsed);
+    fflush(stdout);
+    
+    MPI_File_close(&fh);
+    printf("Rank %d: File closed\n", rank);
+    fflush(stdout);
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        printf("\n=== MPI_File_open: PASSED ===\n\n");
+        remove(filename);
+    }
+}
+
+void test_mpi_file_write_all(int rank, int size) {
+    printf("Rank %d: Testing MPI_File_write_all...\n", rank);
+    fflush(stdout);
+    
+    MPI_File fh;
+    MPI_Status status;
+    const char *filename = "test_write_all.dat";
+    
+    // Open file
+    MPI_Barrier(MPI_COMM_WORLD);
+    int ret = MPI_File_open(MPI_COMM_WORLD, filename,
+                           MPI_MODE_CREATE | MPI_MODE_WRONLY,
+                           MPI_INFO_NULL, &fh);
+    if (ret != MPI_SUCCESS) {
+        fprintf(stderr, "Rank %d: File open failed\n", rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    printf("Rank %d: File opened\n", rank);
+    fflush(stdout);
+    
+    // Each rank writes its rank number
+    int data = rank;
+    MPI_Offset offset = rank * sizeof(int);
+    
+    printf("Rank %d: Setting file view at offset %lld\n", rank, (long long)offset);
+    fflush(stdout);
+    MPI_File_set_view(fh, offset, MPI_INT, MPI_INT, "native", MPI_INFO_NULL);
+    
+    printf("Rank %d: Calling MPI_File_write_all...\n", rank);
+    fflush(stdout);
+    double t_start = MPI_Wtime();
+    MPI_File_write_all(fh, &data, 1, MPI_INT, &status);
+    double t_elapsed = MPI_Wtime() - t_start;
+    
+    printf("Rank %d: Write completed after %.6f s\n", rank, t_elapsed);
+    fflush(stdout);
+    
+    MPI_File_close(&fh);
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        printf("\n=== MPI_File_write_all: PASSED ===\n\n");
+        remove(filename);
+    }
+}
+
+void test_filesystem_info(int rank) {
+    if (rank != 0) return;
+    
+    printf("=== Filesystem Information ===\n");
+    
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("Current directory: %s\n", cwd);
+    }
+    
+    // Try to get filesystem info via MPI
+    MPI_Info info;
+    MPI_Info_create(&info);
+    
+    const char *test_file = "test_fs_info.dat";
+    MPI_File fh;
+    int ret = MPI_File_open(MPI_COMM_SELF, test_file,
+                           MPI_MODE_CREATE | MPI_MODE_WRONLY,
+                           MPI_INFO_NULL, &fh);
+    
+    if (ret == MPI_SUCCESS) {
+        MPI_File_get_info(fh, &info);
+        
+        int nkeys;
+        MPI_Info_get_nkeys(info, &nkeys);
+        printf("MPI-IO Info hints (%d keys):\n", nkeys);
+        
+        for (int i = 0; i < nkeys; i++) {
+            char key[MPI_MAX_INFO_KEY];
+            char value[MPI_MAX_INFO_VAL];
+            int flag;
+            MPI_Info_get_nthkey(info, i, key);
+            MPI_Info_get(info, key, MPI_MAX_INFO_VAL, value, &flag);
+            if (flag) {
+                printf("  %s = %s\n", key, value);
+            }
+        }
+        
+        MPI_File_close(&fh);
+        remove(test_file);
+    } else {
+        printf("Could not open test file for info query\n");
+    }
+    
+    MPI_Info_free(&info);
+    printf("\n");
+}
+
+void test_with_timeout(int rank, int size) {
+    printf("Rank %d: Testing with explicit timeout mechanism...\n", rank);
+    fflush(stdout);
+    
+    const char *filename = "test_timeout.dat";
+    
+    // Set an alarm (Unix-specific)
+    printf("Rank %d: Setting 5-second timeout\n", rank);
+    fflush(stdout);
+    alarm(5);
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    MPI_File fh;
+    printf("Rank %d: Opening file (will timeout if hung)...\n", rank);
+    fflush(stdout);
+    
+    int ret = MPI_File_open(MPI_COMM_WORLD, filename,
+                           MPI_MODE_CREATE | MPI_MODE_WRONLY,
+                           MPI_INFO_NULL, &fh);
+    
+    alarm(0); // Cancel alarm
+    
+    if (ret == MPI_SUCCESS) {
+        printf("Rank %d: File open succeeded\n", rank);
+        MPI_File_close(&fh);
+    } else {
+        printf("Rank %d: File open failed (but didn't hang!)\n", rank);
+    }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        printf("\n=== Timeout test: COMPLETED ===\n\n");
+        remove(filename);
+    }
+}
+
+#endif

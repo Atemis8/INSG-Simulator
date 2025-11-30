@@ -12,14 +12,11 @@ void grad_field(VectorField* o, ScalarField *i, double h, SOP_SIG(op_scal)) {
     ScalarField *dy = &o->v;
 
     PARALLEL(2)
-    for(int x = 1; x < dx->nx-2; ++x)
-        for(int y = 1; y < dx->ny-1; ++y)
+    for(int x = 0; x < dx->nx-1; ++x) 
+        for(int y = 0; y < dx->ny-1; ++y) {
             op_scal(dx, x, y, (get_scal(i, x + 1, y) - get_scal(i, x, y)) / (h));
-
-    PARALLEL(2)
-    for(int x = 1; x < dy->nx-1; ++x) 
-        for(int y = 1; y < dy->ny-2; ++y)
             op_scal(dy, x, y, (get_scal(i, x, y + 1) - get_scal(i, x, y)) / (h)); 
+        }
 }
 
 void vorticity(ScalarField *o, MACMesh *mesh) {

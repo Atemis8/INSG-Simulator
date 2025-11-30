@@ -56,6 +56,7 @@ typedef struct {
 
 // All finite difference operators need synchronization before being called
 int mpi_rank();
+int mpi_size();
 void init_mpi(int argc, char *argv[]);
 void synchronize_cells(double *field, MPIDomain *domain);
 void synchronize_field(ScalarField *field, MPIDomain *domain);

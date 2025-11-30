@@ -23,7 +23,7 @@ SimulationParams load_params(const char *dir);
 int initialize_dump(const char* dir_path);
 void mprintf(const char *fmt, ...);
 void save_fieldtxt(ScalarField *f, const char* file);
-void save_field(ScalarField *f, const char* file);
+void save_field(ScalarField *f, const char* file, MPIDomain *domain);
 void dump_params(SimulationParams *params, PostProcessor *p);
 void dump_mesh(int ep, PostProcessor *post);
 void dump_fish_data(FishData *body, PostProcessor *p);

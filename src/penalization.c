@@ -5,12 +5,11 @@
 #include <stdio.h>
 #include <math.h>
 #include <stdbool.h>
-#include "../headers/penalization.h"
 
-#define xforu(x, h) (h) * (double)(x)
-#define yforu(y, h) (h) * (double)(y - 0.5)
-#define xforv(x, h) (h) * (double)(x - 0.5)
-#define yforv(x, h) (h) * (double)(y)
+#define xforu(x, h, start_x) ((h) * (double)((start_x) + (x)))
+#define yforu(y, h, start_y) ((h) * (double)((start_y) + (y) - 0.5))
+#define xforv(x, h, start_x) ((h) * (double)((start_x) + (x) - 0.5))
+#define yforv(y, h, start_y) ((h) * (double)((start_y) + (y)))
 
 double get_half_width(FishData* fish, double x) {
     double LFish = fish->Lfish;
@@ -19,11 +18,11 @@ double get_half_width(FishData* fish, double x) {
     double wt = 0.01 * LFish;
 
     if (0 <= x && x < wh) {
-        return (double) sqrt( 2 * wh * x - x * x);
+        return (double) sqrt(2 * wh * x - x * x);
     } else if (wh <= x && x < xt) {
-        return  (double) (wh - (wh - wt) * (x - wh) / (xt - wh) * (x - wh)/(xt - wh));
+        return (double) (wh - (wh - wt) * (x - wh) / (xt - wh) * (x - wh)/(xt - wh));
     } else if (xt <= x && x < LFish) {
-        return(double) (wt * ((LFish - x)/(LFish - xt)));
+        return (double) (wt * ((LFish - x)/(LFish - xt)));
     }
    
     return 0.0;
@@ -32,20 +31,22 @@ double get_half_width(FishData* fish, double x) {
 double get_lateral_displacement(FishData* fish, double x, double t) {
     double LFish = fish->Lfish;
     double T = fish->cont->period;
-    return (double) LFish / 264. * (1 + (32* x)/LFish) * sin( 2 * PI *(x/LFish - t / T));
+    return (double) LFish / 264. * (1 + (32* x)/LFish) * sin(2 * PI *(x/LFish - t / T));
 }
 
 double lateral_displacement_dt(FishData* fish, double x, double t) {
     double LFish = fish->Lfish;
     double T = fish->cont->period;
-    return (double) LFish / 264. * (-2 * PI / T) * (1 + (32 * x)/LFish) * cos( 2 * PI *(x/LFish - t / T));
+    return (double) LFish / 264. * (-2 * PI / T) * (1 + (32 * x)/LFish) * cos(2 * PI *(x/LFish - t / T));
 }
 
 double compute_fish_surface(FishData* fish) {
-    int nx = fish->domain->nx;
+    // Only rank 0 computes or all ranks compute the same value
+    // Since this doesn't depend on the domain decomposition
+    int nx = fish->domain->global_nx;  // Use global size
     double Sfish = 0.0;
     for (int x = 0; x < nx; x++) {
-        double xpos = (x - 0.5) * fish->h; // P centered grid
+        double xpos = (x - 0.5) * fish->h;
         double w = get_half_width(fish, xpos - fish->xfish);
         Sfish += w;
     }
@@ -104,7 +105,6 @@ void pid_control(FishData *dat) {
     mprintf(" E:%.3F, I:%.3f, T:%.3f, del:%.3f ", error, ctrl->integral, ctrl->period, delta);
 }
 
-
 FishController* create_controller(double target, double start, void (*up) (FishData*)) {
     FishController* ctrl = malloc(sizeof(FishController));
     memset(ctrl, 0, sizeof(FishController));
@@ -158,6 +158,9 @@ void compute_y_bounds(FishData* fish, double xpos, double time, double y_data[2]
 void compute_speed_mask(FishData* fish, VectorField* out, double time) {
     int nx = fish->domain->tnx;
     int ny = fish->domain->tny;
+    int gw = fish->domain->ghost_width;
+    int start_x = fish->domain->start_x;
+    int start_y = fish->domain->start_y;
     double L = fish->L;
     double xfish = fish->xfish;
     double Lfish = fish->Lfish;
@@ -165,18 +168,20 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
 
     op_vecfield(mask, 0.0, set_scal);
     op_vecfield(out, 0.0, set_scal);
-    // Computes mask in [0, nx-2]x[1, ny-2]
-    // Computes vsn1 in [0, nx-2]x[1, ny-2]
+    
+    // Loop over interior + ghost cells for u-component
     for (int x = 1; x < nx-2; x++) {
         for(int shiftx = -1; shiftx <= 1; ++shiftx) { 
             double bounds_u[2];
-            double xpos_u = xforu(x, fish->h) + shiftx * L;
+            // Convert local x to global coordinate
+            double xpos_u = xforu(x, fish->h, start_x) + shiftx * L;
             compute_y_bounds(fish, xpos_u, time, bounds_u);
 
             if(xpos_u >= xfish && xpos_u <= xfish + Lfish) {
                 for (int y = 1; y < ny - 1; y++) {
-                    double ypos_u = yforu(y, fish->h);
-                    if  (ypos_u >= bounds_u[0] && ypos_u <= bounds_u[1]) {
+                    // Convert local y to global coordinate
+                    double ypos_u = yforu(y, fish->h, start_y);
+                    if (ypos_u >= bounds_u[0] && ypos_u <= bounds_u[1]) {
                         set_scal(&out->u, x, y, fish->ufish);
                         set_scal(&mask->u, x, y, 1.0);
                     }
@@ -185,18 +190,19 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
         }
     }
 
-
+    // Loop over interior + ghost cells for v-component
     for (int x = 1; x < nx - 1; x++) {
         for(int shiftx = -1; shiftx <= 1; ++shiftx) { 
-
             double bounds_v[2];
-            double xpos_v = xforv(x, fish->h) + shiftx * L;
+            // Convert local x to global coordinate
+            double xpos_v = xforv(x, fish->h, start_x) + shiftx * L;
             compute_y_bounds(fish, xpos_v, time, bounds_v);
             double dym = lateral_displacement_dt(fish, xpos_v - fish->xfish, time);
 
             if(xpos_v >= xfish && xpos_v <= xfish + Lfish) {
                 for (int y = 1; y < ny-2; y++) {
-                    double ypos_v = yforv(y, fish->h);
+                    // Convert local y to global coordinate
+                    double ypos_v = yforv(y, fish->h, start_y);
                     if (ypos_v >= bounds_v[0] && ypos_v <= bounds_v[1]) {
                         set_scal(&out->v, x, y, dym + fish->vfish);
                         set_scal(&mask->v, x, y, 1.0);
@@ -210,6 +216,8 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
 void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time) {
     int nx = fish->domain->tnx;
     int ny = fish->domain->tny;
+    int start_x = fish->domain->start_x;
+    int start_y = fish->domain->start_y;
     double L = fish->L;
     double h = fish->h;
     double xfish = fish->xfish;
@@ -218,8 +226,9 @@ void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time)
     op_field(vort_mask, 0.0, set_scal);
     for (int i = 0; i < nx - 1; ++i) {
         for (int j = 0; j < ny - 1; ++j) {
-            double x = i * h;
-            double y = j * h;
+            // Convert to global coordinates
+            double x = (start_x + i) * h;
+            double y = (start_y + j) * h;
 
             for (int shiftx = -1; shiftx <= 1; ++shiftx) {
                 double xshifted = x + shiftx * L;
@@ -239,15 +248,16 @@ void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time)
 void compute_forces(FishData* data, VectorField* integ, int mode) {
     int nx = integ->u.nx;
     int ny = integ->u.ny;
+    int gw = data->domain->ghost_width;
 
     double h = data->h;
     double dt = data->dt;
 
-    // Local computations
+    // Local computations on interior cells only (excluding ghost cells)
     double local_maxu = 0.0;
     double local_Iu = 0.0;
-    for (int x = 0; x < nx - 2; ++x)
-        for (int y = 1; y < ny - 1; ++y) {
+    for (int x = gw; x < nx - gw - 1; ++x)
+        for (int y = gw + 1; y < ny - gw; ++y) {
             double u = (get_scal(&integ->u, x, y) + get_scal(&integ->u, x + 1, y)) / 2.0;
             if(local_maxu < fabs(u)) local_maxu = fabs(u);
             local_Iu += u * h * h;
@@ -255,14 +265,14 @@ void compute_forces(FishData* data, VectorField* integ, int mode) {
 
     double local_maxv = 0.0;
     double local_Iv = 0.0;
-    for (int x = 1; x < nx - 1; ++x)
-        for (int y = 0; y < ny - 2; ++y) {
+    for (int x = gw + 1; x < nx - gw; ++x)
+        for (int y = gw; y < ny - gw - 1; ++y) {
             double v = (get_scal(&integ->v, x, y) + get_scal(&integ->v, x, y + 1)) / 2.0;
             if(local_maxv < fabs(v)) local_maxv = fabs(v);
             local_Iv += v * h * h;
         }
     
-    // Global reductions
+    // Global reductions across all MPI processes
     double Iu = 0.0;
     double Iv = 0.0;
     
@@ -290,7 +300,6 @@ void compute_forces(FishData* data, VectorField* integ, int mode) {
     if (data->xfish < -data->L) data->xfish += data->L;
     if (data->xfish > 2 * data->L) data->xfish -= data->L;
     
-    // mprintf(" ufish : %.2f, vfish : %.2f ", data->ufish, data->vfish);
     mprintf(" xfish : %.2f", data->xfish);
 }
 

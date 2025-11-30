@@ -6,7 +6,7 @@ HAS_MPI := $(shell which mpicc > /dev/null 2>&1 && echo 1 || echo 0)
 
 ifeq ($(HAS_MPI), 1)
     CC := mpicc
-    CFLAGS_MPI := #-DUSE_MPI
+    CFLAGS_MPI := -DUSE_MPI
     # $(info MPI detected: using mpicc)
 else
     CC := gcc
