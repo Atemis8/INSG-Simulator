@@ -152,27 +152,19 @@ void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, Mode
     double w_star;
 
     switch (periodicityflag) {
-    case M_PERIODIC: // Periodic
-
-        // Top and bottom u rows from interior of the domain
-        // Sets the row 0    of u from row ny-2
-        // Sets the row ny-1 of u from row 1
-        // Sets the y=n-2 row of v from y=0 row
-        // Make a MPI swap row function 
-    #ifdef USE_MPI
-        if(domain->dims[1] == 1) {
-    #endif
+#ifndef USE_MPI
+    v->type = -1;
+    u->type = -1;
+    case M_PERIODIC:
         for (int x = 0; x < u->nx-1; ++x) {
             set_scal(u, x, 0, get_scal(u, x, u->ny - 2));
             set_scal(u, x, u->ny - 1, get_scal(u, x, 1));
         }
 
         for (int x = 0; x < v->nx; x++) { 
+            // set_scal(v, x, 0, get_scal(v, x, v->ny - 2));
             set_scal(v, x, v->ny - 2, get_scal(v, x, 0));
         }
-    #ifdef USE_MPI
-        } if(domain->dims[0] == 1) {
-    #endif
         // West and East v rows from interior of domain
         for (int y = 0; y < u->ny-1; y++) {
             set_scal(v, 0, y, get_scal(v, v->nx - 2, y));
@@ -183,11 +175,8 @@ void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, Mode
         for (int y = 0; y < u->ny; y++) {
             set_scal(u, u->nx-2, y, get_scal(u, 0, y));
         }
-    #ifdef USE_MPI
-        }
-    #endif
         break;
-    
+#endif
     case M_BOUNDARY: // Not periodic
 
         // Top and bottom conditions

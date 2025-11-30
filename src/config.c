@@ -25,11 +25,11 @@ void default_params(SimulationParams *params, double N, double Re, double Lstar,
     params->domain = init_domain(N + 2, 3 + H / h, 1, mode);
     params->Re = Re;
     params->num_epsiodes = 1000;
-    params->dump_period = 50;
+    params->dump_period = 20;
     params->nu = nu;
     params->h = h;
     params->dt = min(dt_cfl, dt_r);
-    params->dt = 5e-4;
+    params->dt = 2e-3;
     params->dtau = params->dt / 1e4;
     params->mode = mode;
 
@@ -57,7 +57,7 @@ void init_simulation(Simulation *sim, SimulationParams *params, int argc, char *
     mprintf("tnx : %d, tny : %d, nx : %d, ny : %d\n", params->domain.tnx, params->domain.tny, params->domain.nx, params->domain.ny);
     sim->vstar.u.type = 0;
     sim->vstar.v.type = 1;
-    initialize_poisson_solver(&(sim->pdata), &(sim->phi), params->mode);
+    init_poisson_solver(&params->domain, &(sim->pdata), &(sim->phi), params->mode);
 }
 
 void free_simulation(Simulation* sim) {

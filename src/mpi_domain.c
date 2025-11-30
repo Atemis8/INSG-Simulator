@@ -133,7 +133,7 @@ MPIDomain init_domain(int global_nx, int global_ny, int gw, Mode mode) {
     mprintf("MPI Grid: %d x %d processes\n", domain.dims[0], domain.dims[1]);
     
     // Create Cartesian communicator
-    int periods[2] = {0, 0};
+    int periods[2] = {(mode == M_PERIODIC) ? 1 : 0, (mode == M_PERIODIC) ? 1 : 0};
     MPI_Cart_create(MPI_COMM_WORLD, 2, domain.dims, periods, 1, &domain.cart_comm);
 
     // Get rank and coordinates in Cartesian grid
@@ -150,26 +150,6 @@ MPIDomain init_domain(int global_nx, int global_ny, int gw, Mode mode) {
     int offset2[2] = {+1, +1};
     MPI_Cart_shift_nd(domain.cart_comm, offset1, 2, &domain.nw, &domain.se);
     MPI_Cart_shift_nd(domain.cart_comm, offset2, 2, &domain.sw, &domain.ne);
-
-    // This should handle periodic boundary conditions
-    if(mode == M_PERIODIC) {
-        if(domain.north == MPI_PROC_NULL && domain.dims[1] > 1) {
-            int coords[2] = {domain.coords[0], domain.dims[1] - 1};
-            MPI_Cart_rank(domain.cart_comm, coords, &domain.north);
-        }
-        if(domain.south == MPI_PROC_NULL && domain.dims[1] > 1) {
-            int coords[2] = {domain.coords[0], 0};
-            MPI_Cart_rank(domain.cart_comm, coords, &domain.south);
-        }
-        if(domain.east == MPI_PROC_NULL && domain.dims[0] > 1) {
-            int coords[2] = {0, domain.coords[1]};
-            MPI_Cart_rank(domain.cart_comm, coords, &domain.east);
-        }
-        if(domain.west == MPI_PROC_NULL && domain.dims[0] > 1) {
-            int coords[2] = {domain.dims[0] - 1, domain.coords[1]};
-            MPI_Cart_rank(domain.cart_comm, coords, &domain.west);
-        }
-    }
     
     // Calculate local domain sizes
     int base_nx = global_nx / domain.dims[0];
@@ -218,7 +198,6 @@ void synchronize_cells(double *field, MPIDomain *domain) {
     
     // Anti deadlock code 
     if (domain->east == domain->west && domain->east != MPI_PROC_NULL) {
-        mprintf("DOING COMMUNICATION\n");
         if (domain->rank < domain->east) {
             MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->y_slice, domain->east, 0, domain->cart_comm, &requests[req_count++]);
             MPI_Isend(&field[xytok(nx, 0, tny)], 1, domain->y_slice, domain->east, 1, domain->cart_comm, &requests[req_count++]);
@@ -235,41 +214,33 @@ void synchronize_cells(double *field, MPIDomain *domain) {
             MPI_Isend(&field[xytok(nx, 0, tny)], 1, domain->y_slice, domain->east, 1, domain->cart_comm, &requests[req_count++]);
         }
     } else if (domain->east != MPI_PROC_NULL) {
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->y_slice, domain->east, 0, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(nx, 0, tny)], 1, domain->y_slice, domain->east, 1, domain->cart_comm, &requests[req_count++]);
     } else if (domain->west != MPI_PROC_NULL) { 
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->y_slice, domain->west, 1, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(gw, 0, tny)], 1, domain->y_slice, domain->west, 0, domain->cart_comm, &requests[req_count++]);
     }
     
     if (domain->north == domain->south && domain->north != MPI_PROC_NULL) {
         if (domain->rank < domain->south) {
-            mprintf("DOING COMMUNICATION\n");
             MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->x_slice, domain->north, 2, domain->cart_comm, &requests[req_count++]);
             MPI_Isend(&field[xytok(0, ny, tny)], 1, domain->x_slice, domain->north, 3, domain->cart_comm, &requests[req_count++]);
         } else {
-            mprintf("DOING COMMUNICATION\n");
             MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->x_slice, domain->south, 3, domain->cart_comm, &requests[req_count++]);
             MPI_Isend(&field[xytok(0, gw, tny)], 1, domain->x_slice, domain->south, 2, domain->cart_comm, &requests[req_count++]);
         }
 
         if (domain->rank < domain->south) {
-            mprintf("DOING COMMUNICATION\n");
-            MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->x_slice, domain->south, 3, domain->cart_comm, &requests[req_count++]);
+           MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->x_slice, domain->south, 3, domain->cart_comm, &requests[req_count++]);
             MPI_Isend(&field[xytok(0, gw, tny)], 1, domain->x_slice, domain->south, 2, domain->cart_comm, &requests[req_count++]);
         } else {
-            mprintf("DOING COMMUNICATION\n");
             MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->x_slice, domain->north, 2, domain->cart_comm, &requests[req_count++]);
             MPI_Isend(&field[xytok(0, ny, tny)], 1, domain->x_slice, domain->north, 3, domain->cart_comm, &requests[req_count++]);
         }
     } else if (domain->north != MPI_PROC_NULL) {
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->x_slice, domain->north, 2, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(0, ny, tny)], 1, domain->x_slice, domain->north, 3, domain->cart_comm, &requests[req_count++]);
     } else if (domain->south != MPI_PROC_NULL) {
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->x_slice, domain->south, 3, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(0, gw, tny)], 1, domain->x_slice, domain->south, 2, domain->cart_comm, &requests[req_count++]);
     }
@@ -278,25 +249,21 @@ void synchronize_cells(double *field, MPIDomain *domain) {
     
     req_count = 0;
     if (domain->ne != MPI_PROC_NULL) {
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(nx+gw, ny+gw, tny)], 1, domain->corner, domain->ne, 0, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(nx, ny, tny)], 1, domain->corner, domain->ne, 1, domain->cart_comm, &requests[req_count++]);
     }
     
     if (domain->sw != MPI_PROC_NULL) { 
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->corner, domain->sw, 1, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(gw, gw, tny)], 1, domain->corner, domain->sw, 0, domain->cart_comm, &requests[req_count++]);
     }
     
     if (domain->nw != MPI_PROC_NULL) {
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->corner, domain->nw, 2, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(gw, ny, tny)], 1, domain->corner, domain->nw, 3, domain->cart_comm, &requests[req_count++]);
     }
     
     if (domain->se != MPI_PROC_NULL) {
-        mprintf("DOING COMMUNICATION\n");
         MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->corner, domain->se, 3, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(nx, gw, tny)], 1, domain->corner, domain->se, 2, domain->cart_comm, &requests[req_count++]);
     }

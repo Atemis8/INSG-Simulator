@@ -240,23 +240,37 @@ void compute_forces(FishData* data, VectorField* integ, int mode) {
     double h = data->h;
     double dt = data->dt;
 
-    double maxu = 0.0;
-    double Iu = 0.0;
+    // Local computations
+    double local_maxu = 0.0;
+    double local_Iu = 0.0;
     for (int x = 0; x < nx - 2; ++x)
         for (int y = 1; y < ny - 1; ++y) {
             double u = (get_scal(&integ->u, x, y) + get_scal(&integ->u, x + 1, y)) / 2.0;
-            if(maxu < fabs(u)) maxu = fabs(u);
-            Iu += u * h * h;
+            if(local_maxu < fabs(u)) local_maxu = fabs(u);
+            local_Iu += u * h * h;
         }
 
-    double maxv = 0.0;
-    double Iv = 0.0;
+    double local_maxv = 0.0;
+    double local_Iv = 0.0;
     for (int x = 1; x < nx - 1; ++x)
         for (int y = 0; y < ny - 2; ++y) {
             double v = (get_scal(&integ->v, x, y) + get_scal(&integ->v, x, y + 1)) / 2.0;
-            if(maxv < fabs(v)) maxv = fabs(v);
-            Iv += v * h * h;
+            if(local_maxv < fabs(v)) local_maxv = fabs(v);
+            local_Iv += v * h * h;
         }
+    
+    // Global reductions
+    double Iu = 0.0;
+    double Iv = 0.0;
+    
+#ifdef USE_MPI
+    MPI_Allreduce(&local_Iu, &Iu, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&local_Iv, &Iv, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+#else
+    Iu = local_Iu;
+    Iv = local_Iv;
+#endif
+
     mprintf(" au : %.3e, av : %.3e, ", Iu / data->area, Iv / data->area);
     data->ufish += Iu / data->area;
     if (mode == M_BOUNDARY) data->vfish = 0;

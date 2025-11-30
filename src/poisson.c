@@ -6,240 +6,321 @@
 #include <mpi.h>
 #endif
 
-/* Will transform the scalar field into something usable by the solver (remove useless points) */
-void computeRHS(double *rhs, PetscInt rowStart, PetscInt rowEnd, ScalarField *f, int mode) {
-    int nx_in = f->nx - 2;
+#include <petscdmda.h>
 
-    for (PetscInt row = rowStart; row < rowEnd; ++row) {
-        int y = row / nx_in;
-        int x = row % nx_in;
-
-        rhs[row - rowStart] = get_scal(f, x + 1, y + 1);
+void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain) {
+    PetscScalar **array;
+    PetscInt i, j, xs, ys, xm, ym;
+    
+    DMDAVecGetArray(da, b, &array);
+    DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
+    
+    int gw = domain->ghost_width;
+    
+    // Fill local portion of RHS
+    for (j = ys; j < ys + ym; j++) {
+        for (i = xs; i < xs + xm; i++) {
+            // Convert DMDA global indices to local ScalarField indices
+            // DMDA uses 0-based global indexing
+            // ScalarField uses local indexing with ghosts: [0...gw-1][gw...gw+nx-1][gw+nx...tnx-1]
+            
+            int local_x = (i - domain->start_x) + gw;  // Map to local interior + ghost offset
+            int local_y = (j - domain->start_y) + gw;
+            
+            array[j][i] = get_scal(f, local_x, local_y);
+        }
     }
-
-    if (rowStart == 0 && mode == M_BOUNDARY) rhs[0] = 0.0;
+    
+    // Special handling for boundary mode: pin first point to zero
+    if (xs == 0 && ys == 0 && mode == M_BOUNDARY) {
+        array[0][0] = 0.0;
+    }
+    
+    DMDAVecRestoreArray(da, b, &array);
 }
 
-/*To call at each time step after computation of U_star. This function solves the poisson equation*/
-/*and copies the solution of the equation into your vector Phi*/
-/*More than probably, you should need to add arguments to the prototype ... */
-/*Modification to do :*/
-/*    - Change the call to computeRHS as you have to modify its prototype too*/
-/*    - Copy solution of the equation into your vector PHI*/
-void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
-    int          its;
-    PetscInt     rowStart, rowEnd;
-    PetscScalar *rhs, *sol;
-
-    KSP sles = data->sles;
-    Vec b    = data->b;
-    Vec x    = data->x;
+void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
+    PetscScalar **array;
+    PetscInt i, j, xs, ys, xm, ym;
     
-    /* Fill the right-hand-side vector : b */
-    VecGetOwnershipRange(b, &rowStart, &rowEnd);
-    VecGetArray(b, &rhs);
-    computeRHS(rhs, rowStart, rowEnd, i, data->mode);
-    VecRestoreArray(b, &rhs);
+    DMDAVecGetArray(da, x, &array);
+    DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
+    
+    int gw = domain->ghost_width;
+    
+    // Extract local portion of solution
+    for (j = ys; j < ys + ym; j++) {
+        for (i = xs; i < xs + xm; i++) {
+            // Convert DMDA global indices to local ScalarField indices
+            int local_x = (i - domain->start_x) + gw;
+            int local_y = (j - domain->start_y) + gw;
+            
+            set_scal(o, local_x, local_y, array[j][i]);
+        }
+    }
+    
+    DMDAVecRestoreArray(da, x, &array);
+}
 
+/*
+ * computeLaplacianMatrix_DMDA: Assemble Laplacian matrix using DMDA stencil
+ * Handles both periodic and boundary conditions
+ */
+void computeLaplacianMatrix_DMDA(Mat A, DM da, ScalarField *f, int flagtype) {
+    PetscInt i, j, xs, ys, xm, ym, nx, ny;
+    MatStencil row, col[5];
+    PetscScalar v[5];
+    PetscInt ncols;
+    
+    // Get local portion of grid
+    DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
+    DMDAGetInfo(da, NULL, &nx, &ny, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    
+    switch (flagtype) {
+    case M_PERIODIC:
+        // Periodic boundaries: standard 5-point stencil everywhere
+        for (j = ys; j < ys + ym; j++) {
+            for (i = xs; i < xs + xm; i++) {
+                row.i = i; row.j = j;
+                ncols = 0;
+                
+                // Center: -4
+                col[ncols].i = i; col[ncols].j = j; v[ncols++] = -4.0;
+                
+                // West: +1
+                col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
+                
+                // East: +1
+                col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
+                
+                // South: +1
+                col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
+                
+                // North: +1
+                col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
+                
+                MatSetValuesStencil(A, 1, &row, ncols, col, v, INSERT_VALUES);
+            }
+        }
+        break;
+        
+    case M_BOUNDARY:
+        // Boundary conditions: Neumann on most boundaries, Dirichlet at one point
+        for (j = ys; j < ys + ym; j++) {
+            for (i = xs; i < xs + xm; i++) {
+                row.i = i; row.j = j;
+                ncols = 0;
+                
+                // Special case: bottom-left corner (Dirichlet point to fix constant)
+                if (i == 0 && j == 0) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = 1.0;
+                }
+                // Bottom-right corner
+                else if (i == nx - 1 && j == 0) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -2.0;
+                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
+                }
+                // Top-left corner
+                else if (i == 0 && j == ny - 1) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -2.0;
+                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
+                }
+                // Top-right corner
+                else if (i == nx - 1 && j == ny - 1) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -2.0;
+                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
+                }
+                // Bottom edge (not corners)
+                else if (j == 0) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
+                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
+                }
+                // Top edge (not corners)
+                else if (j == ny - 1) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
+                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
+                }
+                // Left edge (not corners)
+                else if (i == 0) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
+                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
+                }
+                // Right edge (not corners)
+                else if (i == nx - 1) {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -3.0;
+                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
+                }
+                // Interior points
+                else {
+                    col[ncols].i = i; col[ncols].j = j; v[ncols++] = -4.0;
+                    col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
+                    col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
+                }
+                
+                MatSetValuesStencil(A, 1, &row, ncols, col, v, INSERT_VALUES);
+            }
+        }
+        break;
+        
+    default:
+        mprintf("Error: Unknown flagtype in computeLaplacianMatrix_DMDA\n");
+        break;
+    }
+}
+
+/*
+ * poisson_solver: Solve Poisson equation and update solution field
+ * Handles both periodic and boundary conditions
+ */
+void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
+    int its;
+    
+    /* Fill right-hand-side vector */
+    computeRHS_DMDA(data->b, data->da, i, data->mode, data->domain);
+    
+    /* For periodic: remove null space (constant) */
     if (data->mode == M_PERIODIC) {
         MatNullSpace nullsp;
         MatGetNullSpace(data->A, &nullsp);
         MatNullSpaceRemove(nullsp, data->b);
     }
-
-    /*Solve the linear system of equations */
-    KSPSolve(sles, b, x);
-    KSPGetIterationNumber(sles, &its);
-
+    
+    /* Solve the linear system */
+    KSPSolve(data->sles, data->b, data->x);
+    KSPGetIterationNumber(data->sles, &its);
+    
+    /* For periodic: shift solution to have zero mean */
     if (data->mode == M_PERIODIC) {
         PetscScalar sum_phi;
-        VecSum(x, &sum_phi);
-        VecShift(x, -sum_phi / ((o->nx-2) * (o->ny-2)));
+        VecSum(data->x, &sum_phi);
+        PetscInt nx, ny;
+        DMDAGetInfo(data->da, NULL, &nx, &ny, NULL, NULL, NULL, NULL, 
+                   NULL, NULL, NULL, NULL, NULL, NULL);
+        VecShift(data->x, -sum_phi / (nx * ny));
     }
-
-    // Get local portion of solution
-    VecGetOwnershipRange(x, &rowStart, &rowEnd);
-    VecGetArray(x, &sol);
-
-    int nx = o->nx;
-    int ny = o->ny;
-
-    // Each rank fills in its portion of the solution
-    for(PetscInt idx = rowStart; idx < rowEnd; ++idx) {
-        int y = idx / (nx-2);
-        int x = idx % (nx-2);
-        set_scal(o, x + 1, y + 1, sol[idx - rowStart]);
-    }
-
-    VecRestoreArray(x, &sol);
-
-    // Set boundary values
-    switch(data->mode) {
-    case M_PERIODIC:
-        set_scal(o, 0, 0, get_scal(o, nx-2, ny-2));
-        set_scal(o, nx-1, 0, get_scal(o, 1, ny-2));
-        set_scal(o, 0, ny-1, get_scal(o, nx-2, 1));
-        set_scal(o, nx-1, ny-1, get_scal(o, 1, 1));
-
-        // Top and Bottom rows
-        for(int x = 1; x < nx-1; ++x) {
-            set_scal(o, x, 0, get_scal(o, x, ny-2));
-            set_scal(o, x, ny-1, get_scal(o, x, 1));
-        }
-
-        // Left and Right columns
-        for(int y = 1; y < ny-1; ++y) {
-            set_scal(o, 0, y, get_scal(o, nx-2, y));
-            set_scal(o, nx-1, y, get_scal(o, 1, y));
-        }
-        break;
-        
-    case M_BOUNDARY:
-
-        // First the 4 cornes which are equal to the diagonal term
-        set_scal(o, 0, 0, get_scal(o, 1, 1));
-        set_scal(o, nx-1, 0, get_scal(o, nx-2, 1));
-        set_scal(o, 0, ny-1, get_scal(o, 1, ny-2));
-        set_scal(o, nx-1, ny-1, get_scal(o, nx-2, ny-2));
-
-        // Now do top and bottom rows
-        for(int x = 1; x < nx-1; ++x) {
-            set_scal(o, x, 0, get_scal(o, x, 1));
-            set_scal(o, x, ny-1, get_scal(o, x, ny-2));
-        }
-
-        for(int y = 1; y < ny-1; ++y) {
-            set_scal(o, 0, y, get_scal(o, 1, y));
-            set_scal(o, nx-1, y, get_scal(o, nx-2, y));
-        }
-        break;
-    }
-}
-
-/*This function is called only once during the simulation, i.e. in initialize_poisson_solver.*/
-/*In its current state, it inserts unity on the main diagonal.*/
-/*More than probably, you should need to add arguments to the prototype ... .*/
-/*Modification to do in this function : */
-/*   -Insert the correct factor in matrix A*/
-void computeLaplacianMatrix(Mat A, int rowStart, int rowEnd, ScalarField *f, int flagtype) {
-    // Consider a N x M grid, a point (i, j) on the grid 
-
-    int r;
-    int nx = f->nx-2;
-    int ny = f->ny-2;
-
-    switch (flagtype) {
-    case M_PERIODIC:
-        for (r = rowStart; r < rowEnd; r++) {
-            int y = r / nx;
-            int x = r % nx;
-            
-            // Calculate indices for neighbors, with periodic wrapping
-            int left = (x == 0) ? r + nx - 1 : r - 1;
-            int right = (x == nx - 1) ? r - nx + 1 : r + 1;
-            int up = (y == 0) ? r + nx * (ny - 1) : r - nx;
-            int down = (y == ny - 1) ? r - nx * (ny - 1) : r + nx;
-            
-            // Set matrix values
-            MatSetValue(A, r, r, -4.0, INSERT_VALUES);
-            MatSetValue(A, r, left, 1.0, INSERT_VALUES);
-            MatSetValue(A, r, right, 1.0, INSERT_VALUES);
-            MatSetValue(A, r, up, 1.0, INSERT_VALUES);
-            MatSetValue(A, r, down, 1.0, INSERT_VALUES);
-        }
-        break;
     
+    /* Extract solution to ScalarField */
+    extractSolution_DMDA(data->x, data->da, o, data->domain);
+    
+    /* Set ghost cell values based on boundary conditions */
+
+     PetscInt nx = data->domain->tnx;  // total including ghosts
+    PetscInt ny = data->domain->tny;
+    int gw = data->domain->ghost_width;
+
+    switch (data->mode) {
+
     case M_BOUNDARY:
-        for (r = rowStart; r < rowEnd; r++) {
-            if (r == 0) {
-                MatSetValue(A, r, r, 1.0, INSERT_VALUES);
-            } else if (r < nx - 1) {
-                MatSetValue(A, r, r, -3.0, INSERT_VALUES);
-                MatSetValue(A, r, r - 1, 1.0, INSERT_VALUES);
-                MatSetValue(A, r, r + 1, 1.0, INSERT_VALUES);
-                MatSetValue(A, r, r + nx, 1.0, INSERT_VALUES);
-            } else if (r == nx - 1) {
-                MatSetValue(A, r, r, -2.0, INSERT_VALUES);
-                MatSetValue(A, r, r - 1, 1.0, INSERT_VALUES);
-                MatSetValue(A, r, r + nx, 1.0, INSERT_VALUES);
-            } else if (r >= nx && r < nx * (ny - 1)) {
-                if(r % nx == 0) {
-                    MatSetValue(A, r, r, -3.0, INSERT_VALUES);
-                    MatSetValue(A, r, r + 1, 1.0, INSERT_VALUES);
-                    MatSetValue(A, r, r - nx, 1.0, INSERT_VALUES);
-                    MatSetValue(A, r, r + nx, 1.0, INSERT_VALUES);
-                } else if(r % nx == nx - 1) {
-                    MatSetValue(A, r, r, -3.0, INSERT_VALUES);
-                    MatSetValue(A, r, r - 1, 1.0, INSERT_VALUES);
-                    MatSetValue(A, r, r - nx, 1.0, INSERT_VALUES);
-                    MatSetValue(A, r, r + nx, 1.0, INSERT_VALUES);
-                } else {
-                    MatSetValue(A, r, r, -4.0, INSERT_VALUES);
-                    MatSetValue(A, r, r + 1, 1.0, INSERT_VALUES);
-                    MatSetValue(A, r, r - 1, 1.0, INSERT_VALUES);
-                    MatSetValue(A, r, r + nx, 1.0, INSERT_VALUES);
-                    MatSetValue(A, r, r - nx, 1.0, INSERT_VALUES);
-                }
-            } else if (r == nx * (ny - 1)) {
-                MatSetValue(A, r, r, -2.0, INSERT_VALUES);
-                MatSetValue(A, r, r + 1, 1.0, INSERT_VALUES);
-                MatSetValue(A, r, r - nx, 1.0, INSERT_VALUES);
-            } else if (r < nx * ny - 1) {
-                MatSetValue(A, r, r, -3.0, INSERT_VALUES);
-                MatSetValue(A, r, r - 1, 1.0, INSERT_VALUES);
-                MatSetValue(A, r, r + 1, 1.0, INSERT_VALUES);
-                MatSetValue(A, r, r - nx, 1.0, INSERT_VALUES);
-            } else if (r == nx * ny - 1) {
-                MatSetValue(A, r, r, -2.0, INSERT_VALUES);
-                MatSetValue(A, r, r - 1, 1.0, INSERT_VALUES);
-                MatSetValue(A, r, r - nx, 1.0, INSERT_VALUES);
-            }
+        /* Neumann BCs: ghost = interior */
+
+        /* Corners */
+        set_scal(o, gw-1,     gw-1,     get_scal(o, gw,     gw));
+        set_scal(o, nx-gw,    gw-1,     get_scal(o, nx-gw-1,gw));
+        set_scal(o, gw-1,     ny-gw,    get_scal(o, gw,     ny-gw-1));
+        set_scal(o, nx-gw,    ny-gw,    get_scal(o, nx-gw-1,ny-gw-1));
+
+        /* Bottom and top boundaries */
+        for (int x = gw; x < nx-gw; x++) {
+            set_scal(o, x, gw-1,     get_scal(o, x, gw));
+            set_scal(o, x, ny-gw,    get_scal(o, x, ny-gw-1));
         }
+
+        /* Left and right boundaries */
+        for (int y = gw; y < ny-gw; y++) {
+            set_scal(o, gw-1,    y, get_scal(o, gw,      y));
+            set_scal(o, nx-gw,   y, get_scal(o, nx-gw-1, y));
+        }
+
         break;
-    default:
-        mprintf("Error: Unknown flagtype in computeLaplacianMatrix\n");
+
+
+    case M_PERIODIC:
+        /* Periodic BCs: wrap ghost cells */
+
+        /* Left/right periodic */
+        for (int y = gw; y < ny-gw; y++) {
+            // left ghosts
+            for (int k = 0; k < gw; k++)
+                set_scal(o, k, y, get_scal(o, nx-2*gw + k, y));
+
+            // right ghosts
+            for (int k = 0; k < gw; k++)
+                set_scal(o, nx-gw + k, y, get_scal(o, gw + k, y));
+        }
+
+        /* Top/bottom periodic */
+        for (int x = 0; x < nx; x++) {
+            for (int k = 0; k < gw; k++)
+                set_scal(o, x, k,          get_scal(o, x, ny-2*gw + k));
+            for (int k = 0; k < gw; k++)
+                set_scal(o, x, ny-gw + k,  get_scal(o, x, gw + k));
+        }
+
         break;
     }
+    
 }
 
-/*To call during the initialization of your solver, before the begin of the time loop*/
-/*Maybe you should need to add an argument to specify the number of unknows*/
-/*Modification to do in this function :*/
-/*   -Specify the number of unknows*/
-/*   -Specify the number of non-zero diagonals in the sparse matrix*/
-PetscErrorCode initialize_poisson_solver(Poisson_data *data, ScalarField* o, int mode) {
-    PetscInt       rowStart, rowEnd;
+/*
+ * initialize_poisson_solver: Set up DMDA, matrix, vectors, and solver
+ * Called once during simulation initialization
+ */
+PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, ScalarField* o, int mode) {
     PetscErrorCode ierr;
 
-    int nphi = (o->nx-2) * (o->ny-2);
     data->mode = mode;
+    data->domain = domain;
 
-    /* Create the right-hand-side vector : b */
-    ierr = VecCreate(PETSC_COMM_WORLD, &(data->b)); CHKERRQ(ierr);
-    ierr = VecSetSizes(data->b, PETSC_DECIDE, nphi); CHKERRQ(ierr);
-    ierr = VecSetFromOptions(data->b); CHKERRQ(ierr);
-
-    /* Create the solution vector : x */
-    ierr = VecCreate(PETSC_COMM_WORLD, &(data->x)); CHKERRQ(ierr);
-    ierr = VecSetSizes(data->x, PETSC_DECIDE, nphi); CHKERRQ(ierr);
-    ierr = VecSetFromOptions(data->x); CHKERRQ(ierr);
-
-    /* Create and assemble the Laplacian matrix : A  */
-    ierr = MatCreate(PETSC_COMM_WORLD, &(data->A)); CHKERRQ(ierr);
-    ierr = MatSetSizes(data->A, PETSC_DECIDE, PETSC_DECIDE, nphi, nphi); CHKERRQ(ierr);
-    ierr = MatSetFromOptions(data->A); CHKERRQ(ierr);
-    ierr = MatSetUp(data->A); CHKERRQ(ierr);
+    /* Create DMDA for structured grid management */
+    DM da;
+    DMBoundaryType bx = (mode == M_PERIODIC) ? DM_BOUNDARY_PERIODIC : DM_BOUNDARY_NONE;
+    DMBoundaryType by = (mode == M_PERIODIC) ? DM_BOUNDARY_PERIODIC : DM_BOUNDARY_NONE;
     
-    ierr = MatMPIAIJSetPreallocation(data->A, 5, NULL, 5, NULL); CHKERRQ(ierr);
-    ierr = MatSeqAIJSetPreallocation(data->A, 5, NULL); CHKERRQ(ierr);
+    // Grid size excludes ghost cells (interior points only)
+    PetscInt grid_nx = domain->global_nx;
+    PetscInt grid_ny = domain->global_ny;
     
-    ierr = MatGetOwnershipRange(data->A, &rowStart, &rowEnd); CHKERRQ(ierr);
+    ierr = DMDACreate2d(PETSC_COMM_WORLD,
+                       bx, by,
+                       DMDA_STENCIL_STAR,
+                       grid_nx, grid_ny,     // Global interior grid size
+                       domain->dims[0], domain->dims[1],
+                       1,                     // 1 DOF per node (scalar)
+                       1,                     // Stencil width = 1
+                       NULL, NULL,
+                       &da); CHKERRQ(ierr);
+    ierr = DMSetFromOptions(da); CHKERRQ(ierr);
+    ierr = DMSetUp(da); CHKERRQ(ierr);
+    
+    data->da = da;
 
-    computeLaplacianMatrix(data->A, rowStart, rowEnd, o, mode);
+    /* Create vectors from DMDA (automatically distributed) */
+    ierr = DMCreateGlobalVector(da, &(data->b)); CHKERRQ(ierr);
+    ierr = DMCreateGlobalVector(da, &(data->x)); CHKERRQ(ierr);
+
+    /* Create matrix from DMDA (automatically sets up parallel structure) */
+    ierr = DMCreateMatrix(da, &(data->A)); CHKERRQ(ierr);
+    
+    /* Assemble Laplacian matrix */
+    computeLaplacianMatrix_DMDA(data->A, da, o, mode);
     
     ierr = MatAssemblyBegin(data->A, MAT_FINAL_ASSEMBLY); CHKERRQ(ierr);
     ierr = MatAssemblyEnd(data->A, MAT_FINAL_ASSEMBLY); CHKERRQ(ierr);
 
+    /* For periodic: set null space to handle singular system */
     if (mode == M_PERIODIC) {
         MatNullSpace nullspace;
         ierr = MatNullSpaceCreate(PETSC_COMM_WORLD, PETSC_TRUE, 0, NULL, &nullspace); CHKERRQ(ierr);
@@ -247,27 +328,45 @@ PetscErrorCode initialize_poisson_solver(Poisson_data *data, ScalarField* o, int
         ierr = MatNullSpaceDestroy(&nullspace); CHKERRQ(ierr);
     }
 
-    /* Create the Krylov context */
+    /* Create Krylov solver */
     ierr = KSPCreate(PETSC_COMM_WORLD, &(data->sles)); CHKERRQ(ierr);
     ierr = KSPSetOperators(data->sles, data->A, data->A); CHKERRQ(ierr);
     ierr = KSPSetType(data->sles, KSPCG); CHKERRQ(ierr);
     
+    /* Set preconditioner */
     PC prec;
     ierr = KSPGetPC(data->sles, &prec); CHKERRQ(ierr);
-    ierr = PCSetType(prec, PCGAMG); CHKERRQ(ierr);
+    
+    int size;
+    MPI_Comm_size(PETSC_COMM_WORLD, &size);
+    
+    if (size == 1) {
+        // Sequential: use direct LU solver
+        ierr = PCSetType(prec, PCLU); CHKERRQ(ierr);
+    } else {
+        // Parallel: use block Jacobi with LU on each block
+        ierr = PCSetType(prec, PCBJACOBI); CHKERRQ(ierr);
+    }
+    
+    /* Set solver tolerances and options */
     ierr = KSPSetTolerances(data->sles, 1.e-12, 1e-12, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
     ierr = KSPSetReusePreconditioner(data->sles, PETSC_TRUE); CHKERRQ(ierr);
     ierr = KSPSetUseFischerGuess(data->sles, 1, 4); CHKERRQ(ierr);
-    ierr = KSPGMRESSetPreAllocateVectors(data->sles); CHKERRQ(ierr);
+    
+    /* Allow command-line options to override settings */
+    ierr = KSPSetFromOptions(data->sles); CHKERRQ(ierr);
 
     PetscPrintf(PETSC_COMM_WORLD, "Assembly of Matrix and Vectors is done\n");
 
     return ierr;
 }
 
-/*To call after the simulation to free the vectors needed for Poisson equation*/
-/*Modification to do : nothing */
+/*
+ * free_poisson_solver: Clean up PETSc objects
+ * Called at end of simulation
+ */
 void free_poisson_solver(Poisson_data *data) {
+    DMDestroy(&(data->da));
     MatDestroy(&(data->A));
     VecDestroy(&(data->b));
     VecDestroy(&(data->x));

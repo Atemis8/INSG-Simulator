@@ -222,52 +222,96 @@ void test_vectorfield_integration(double Lx, double Ly, double h) {
 }
 
 
-
 void test_poisson_solver(int N) {
-    int nx = N + 2;
-    int ny = N + 2;
     double h = 2.0 / N;
     
-    ScalarField phi = allocate_field(nx, ny);
+    // Initialize MPI domain with periodic boundaries
+    MPIDomain domain = init_domain(N, N, 1, M_PERIODIC);  // 1 = periodic
+    
+    // Each process allocates its local portion with ghost cells
+    ScalarField phi = allocate_field(domain.tnx, domain.tny);
 
-    Poisson_data data;
-    initialize_poisson_solver(&data, &phi, M_PERIODIC);
+    Poisson_data pdata;
+    init_poisson_solver(&domain, &pdata, &phi, M_PERIODIC);
 
-    // Set source term: f = -2π² sin(πx) sin(πy)
-    for (int x = -1; x < N + 1; ++x)
-        for (int y = -1; y < N + 1; ++y) {
-            double val = -2.0 * M_PI * M_PI * sin(M_PI * x * h) * sin(M_PI * y * h);
-            set_scal(&phi, x + 1, y + 1, val);
-        }
-
-    mprintf("Compatibility condition : %.3e\n", fabs(reduce_field(&phi)) * h * h);
-    poisson_solver(&data, &phi, &phi);
-    op_field(&phi, h * h, mul_scal);
-
-    ScalarField num = allocate_field(nx, ny);
-
-    double rms_err = 0.0;
-    double max_err = 0.0;
-    for (int x = -1; x < N + 1; ++x) {
-        for (int y = -1; y < N + 1; ++y) {
-            double err = get_scal(&phi, x+1, y+1) - sin(M_PI * x * h) * sin(M_PI * y * h);
-            set_scal(&num, x+1, y+1, err);
-            rms_err += err * err;
-            if (fabs(err) > max_err) max_err = fabs(err);
+    // Set source term: f = -2π² sin(πx) sin(πy) in interior cells
+    int gw = domain.ghost_width;
+    for (int x = 0; x < domain.nx; ++x) {
+        for (int y = 0; y < domain.ny; ++y) {
+            int xval = (domain.start_x + x) * h;
+            int yval = (domain.start_y + y) * h;
+            
+            double val = -2.0 * M_PI * M_PI * sin(M_PI * xval) * sin(M_PI * yval);
+            set_scal(&phi, x + gw, y + gw, val);
         }
     }
+    
+    // Synchronize ghost cells (enforces periodic BC via MPI exchange)
+    synchronize_field(&phi, &domain);
 
-    save_field(&num, "anal.npy");
-    save_field(&phi, "num.npy");
+    // Solve Poisson equation
+    poisson_solver(&pdata, &phi, &phi);
+    op_field(&phi, h * h, mul_scal);
+    
+    // Synchronize solution ghost cells
+    synchronize_field(&phi, &domain);
 
-    mprintf("Poisson solver -> RMS error: %.3e, Max error: %.3e\n", rms_err / (N * N), max_err);
-    free_field(&num);
+    // Compute error (check all cells including ghosts for periodic consistency)
+    ScalarField num_error = allocate_field(domain.tnx, domain.tny);
+    
+    double local_rms_err = 0.0;
+    double local_max_err = 0.0;
+    int local_count = 0;
+    
+    // Check all cells for error computation
+    for (int x = 0; x < domain.tnx; ++x) {
+        for (int y = 0; y < domain.tny; ++y) {
+            int xval = (domain.start_x + (x - gw)) * h;
+            int yval = (domain.start_y + (y - gw)) * h;
+            
+            double analytical = sin(M_PI * xval) * sin(M_PI * yval);
+            double numerical = get_scal(&phi, x, y);
+            double err = numerical - analytical;
+            
+            set_scal(&num_error, x, y, err);
+            
+            local_rms_err += err * err;
+            if (fabs(err) > local_max_err) local_max_err = fabs(err);
+            local_count++;
+        }
+    }
+    
+    // Reduce errors across all processes
+    double global_rms_err = 0.0;
+    double global_max_err = 0.0;
+    int global_count = 0;
+    
+#ifdef USE_MPI
+    MPI_Allreduce(&local_rms_err, &global_rms_err, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&local_max_err, &global_max_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+#else
+    global_rms_err = local_rms_err;
+    global_max_err = local_max_err;
+    global_count = local_count;
+#endif
+
+    mprintf("Poisson solver -> RMS error: %.3e, Max error: %.3e\n", sqrt(global_rms_err / global_count), global_max_err);
+
+    free_field(&num_error);
     free_field(&phi);
+    free_poisson_solver(&pdata);
 }
 
 void test_mpidomain(int global_nx, int global_ny) {
     MPIDomain domain = init_domain(global_nx, global_ny, 1, M_PERIODIC);
-
+    
+    printf("rank : %d\n", domain.rank);
+    printf("No domain : %d \n", MPI_PROC_NULL);
+    printf("North : %d \n", domain.north);
+    printf("East : %d \n", domain.east);
+    printf("South : %d \n", domain.south);
+    printf("West : %d \n", domain.west);
 #ifdef USE_MPI
     if (domain.rank == 0) {
         printf("\n========================================\n");
