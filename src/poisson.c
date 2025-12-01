@@ -17,13 +17,20 @@ void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain)
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
     
     int gw = domain->ghost_width;
-    
     // Since MPIDomain now matches DMDA, this is simple
+
+    assert(xm == domain->nx && ym == domain->ny);
+    assert(xs == domain->start_x && ys == domain->start_y);
+    assert(xm < f->nx && ym < f->ny);
+
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
             int local_x = (i - xs) + gw;
             int local_y = (j - ys) + gw;
-            
+
+            assert(xs <= i && i <= xs+xm-1);
+            assert(ys <= j && j <= ys+ym-1);
+
             array[j][i] = get_scal(f, local_x, local_y);
         }
     }
@@ -48,11 +55,10 @@ void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
         for (i = xs; i < xs + xm; i++) {
             int local_x = (i - xs) + gw;
             int local_y = (j - ys) + gw;
-            
+             
             set_scal(o, local_x, local_y, array[j][i]);
         }
     }
-    
     DMDAVecRestoreArray(da, x, &array);
 }
 
@@ -150,6 +156,7 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Mode m
     PetscErrorCode ierr;
 
     data->mode = mode;
+    data->domain = domain;
 
     DM da;
     DMBoundaryType bx = (mode == M_PERIODIC) ? DM_BOUNDARY_PERIODIC : DM_BOUNDARY_NONE;
@@ -164,14 +171,13 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Mode m
     MPI_Comm petsc_comm = PETSC_COMM_WORLD;
 #endif
     
-    // ============ Let DMDA decide decomposition ============
     ierr = DMDACreate2d(petsc_comm,
                        bx, by,
                        DMDA_STENCIL_STAR,
                        grid_nx, grid_ny,
                        domain->dims[0], domain->dims[1],
                        1, 1,
-                       NULL, NULL,  // Let DMDA choose
+                       NULL, NULL,
                        &da); CHKERRQ(ierr);
     
     ierr = DMSetFromOptions(da); CHKERRQ(ierr);

@@ -238,7 +238,7 @@ int main(int argc, char *argv[]) {
             test_divergence(1.0, 1.0, 1.0 / (1ULL << 8));
 
         }
-        test_poisson_solver(139);
+        test_poisson_solver(111);
         test_poisson_solver(345);
     #ifdef USE_MPI
         test_basic_collectives(mpi_rank(), mpi_size());

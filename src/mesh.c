@@ -143,7 +143,6 @@ void op_fieldwise_mul(ScalarField *t, ScalarField *s, double m, SOP_SIG(op)) {
 }
 
 ScalarField allocate_field(int nx, int ny) {
-    printf("Rank : %d, Allocating field of size (%d, %d)\n", mpi_rank(), nx, ny);
     double *v = calloc(nx * ny, sizeof(double));
     return (ScalarField) {.v=v, .nx=nx, .ny=ny, .type=-1};
 }
