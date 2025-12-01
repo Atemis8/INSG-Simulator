@@ -152,8 +152,8 @@ void save_field_mpiio(ScalarField* f, const char *filename, MPIDomain *domain) {
     MPI_Bcast(&header_size, 1, MPI_OFFSET, 0, MPI_COMM_WORLD);
     
     // Extract interior data (without ghost cells)
-    int local_nx = domain->nx;
-    int local_ny = domain->ny;
+    int local_nx = f->nx - 2 * gw;
+    int local_ny = f->ny - 2 * gw;
     double *interior_data = malloc(local_nx * local_ny * sizeof(double));
     
     // Copy interior data (column-major: x varies fastest)

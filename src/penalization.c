@@ -225,8 +225,8 @@ void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time)
     for (int i = 0; i < vort_mask->nx; ++i) {
         for (int j = 0; j < vort_mask->ny; ++j) {
             // Convert to global coordinates
-            double x = (start_x + i) * h;
-            double y = (start_y + j) * h;
+            double x = (start_x + 1 + i) * h;
+            double y = (start_y + 1 + j) * h;
 
             for (int shiftx = -1; shiftx <= 1; ++shiftx) {
                 double xshifted = x + shiftx * L;
@@ -282,7 +282,6 @@ void compute_forces(FishData* data, VectorField* integ, int mode) {
     Iv = local_Iv;
 #endif
 
-    mprintf(" au : %.3e, av : %.3e, ", Iu / data->area, Iv / data->area);
     data->ufish += Iu / data->area;
     if (mode == M_BOUNDARY) data->vfish = 0;
     if (mode == M_PERIODIC){

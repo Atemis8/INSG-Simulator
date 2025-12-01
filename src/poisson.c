@@ -101,8 +101,7 @@ void computeLaplacianMatrix_DMDA(Mat A, DM da, ScalarField *f, int flagtype) {
  * Handles both periodic and boundary conditions
  */
 void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
-    int its;
-    
+
     /* Fill right-hand-side vector */
     computeRHS_DMDA(data->b, data->da, i, data->mode, data->domain);
     
@@ -115,7 +114,16 @@ void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
     
     /* Solve the linear system */
     KSPSolve(data->sles, data->b, data->x);
+    // Add diagnostics
+    PetscInt its;
+    PetscReal rnorm;
     KSPGetIterationNumber(data->sles, &its);
+    KSPGetResidualNorm(data->sles, &rnorm);
+    
+    KSPConvergedReason reason;
+    KSPGetConvergedReason(data->sles, &reason);
+    
+    PetscPrintf(PETSC_COMM_WORLD, " KSP: its=%d, rnorm=%.2e, ", its, rnorm);
     
     /* For periodic: shift solution to have zero mean */
     if (data->mode == M_PERIODIC) {
@@ -204,12 +212,23 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Scalar
         // Sequential: use direct LU solver
         ierr = PCSetType(prec, PCLU); CHKERRQ(ierr);
     } else {
-        // Parallel: use block Jacobi with LU on each block
-        ierr = PCSetType(prec, PCBJACOBI); CHKERRQ(ierr);
+        ierr = PCSetType(prec, PCGAMG); CHKERRQ(ierr);
+
+        /* AMG controls */
+        ierr = PCGAMGSetNSmooths(prec, 1); CHKERRQ(ierr);
+        ierr = PCGAMGSetType(prec, PCGAMGAGG); CHKERRQ(ierr);
+        ierr = PCGAMGSetNlevels(prec, 4); CHKERRQ(ierr);
+        ierr = PCGAMGSetAggressiveLevels(prec, 1); CHKERRQ(ierr);
+        ierr = PCGAMGSetThresholdScale(prec, 1.0); CHKERRQ(ierr); // 1.0 means no extra scaling
+        {
+            PetscReal thr = 0.04;
+            ierr = PCGAMGSetThreshold(prec, &thr, 1); CHKERRQ(ierr);
+        }
     }
+
     
     /* Set solver tolerances and options */
-    ierr = KSPSetTolerances(data->sles, 1.e-12, 1e-12, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
+    ierr = KSPSetTolerances(data->sles, 1e-8, 1e-8, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
     ierr = KSPSetReusePreconditioner(data->sles, PETSC_TRUE); CHKERRQ(ierr);
     ierr = KSPSetUseFischerGuess(data->sles, 1, 4); CHKERRQ(ierr);
     

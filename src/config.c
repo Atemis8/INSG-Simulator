@@ -22,9 +22,9 @@ void default_params(SimulationParams *params, double N, double Re, double Lstar,
     double dt_cfl = CFL_max * h / u_max_guess;
     double dt_r = r_max * h * h / nu;
 
-    params->domain = init_domain(N + 2, 3 + H / h, 1, mode);
+    params->domain = init_domain(N, 1 + H / h, 1, mode);
     params->Re = Re;
-    params->num_epsiodes = 1000;
+    params->num_epsiodes = 5000;
     params->dump_period = 20;
     params->nu = nu;
     params->h = h;

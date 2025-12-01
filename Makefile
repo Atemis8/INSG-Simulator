@@ -6,7 +6,7 @@ HAS_MPI := $(shell which mpicc > /dev/null 2>&1 && echo 1 || echo 0)
 
 ifeq ($(HAS_MPI), 1)
     CC := mpicc
-    CFLAGS_MPI := #-DUSE_MPI
+    CFLAGS_MPI := -DUSE_MPI
     # $(info MPI detected: using mpicc)
 else
     CC := gcc
@@ -30,8 +30,8 @@ endif
 
 # === Mode Configuration ===
 ifeq ($(MODE), debug)
-    CFLAGS_MODE := -O0 -fsanitize=address,leak -Wall -g 
-    LDFLAGS_MODE := -fsanitize=address,leak -g 
+    CFLAGS_MODE := -O0 -fsanitize=address -Wall -g 
+    LDFLAGS_MODE := -fsanitize=address -g 
 else ifeq ($(MODE), opt)
     CFLAGS_MODE := -O3 -ffast-math -march=native -flto
     LDFLAGS_MODE := -flto
