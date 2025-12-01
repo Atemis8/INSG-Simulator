@@ -6,7 +6,7 @@
 #ifdef USE_MPI
 #include <mpi.h>
 #endif
-
+#include <assert.h>
 #include <petscdmda.h>
 
 void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain) {
@@ -51,6 +51,9 @@ void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
     
     DMDAVecGetArray(da, x, &array);
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
+
+    assert(xs == domain->start_x && ys == domain->start_y);
+    assert(xm == domain->nx && ym == domain->ny);
     
     int gw = domain->ghost_width;
     
@@ -173,8 +176,6 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Scalar
     PetscInt grid_nx = domain->global_nx;
     PetscInt grid_ny = domain->global_ny;
     
-    // ============ FIX: Tell DMDA your exact decomposition ============
-    
     // Build arrays describing how many points each process has in each direction
     PetscInt *lx = (PetscInt*)malloc(domain->dims[0] * sizeof(PetscInt));
     PetscInt *ly = (PetscInt*)malloc(domain->dims[1] * sizeof(PetscInt));
@@ -185,14 +186,12 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Scalar
     int extra_ny = grid_ny % domain->dims[1];
     
     // X-direction distribution (must match your MPIDomain calculation!)
-    for (int i = 0; i < domain->dims[0]; i++) {
+    for (int i = 0; i < domain->dims[0]; i++)
         lx[i] = base_nx + (i < extra_nx ? 1 : 0);
-    }
     
     // Y-direction distribution (must match your MPIDomain calculation!)
-    for (int j = 0; j < domain->dims[1]; j++) {
+    for (int j = 0; j < domain->dims[1]; j++)
         ly[j] = base_ny + (j < extra_ny ? 1 : 0);
-    }
     
     // Verify the sum is correct
     PetscInt sum_x = 0, sum_y = 0;
@@ -200,9 +199,15 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Scalar
     for (int j = 0; j < domain->dims[1]; j++) sum_y += ly[j];
     assert(sum_x == grid_nx);
     assert(sum_y == grid_ny);
-    
+
+    #ifdef USE_MPI
+        MPI_Comm petsc_comm = domain->cart_comm;
+    #else
+        MPI_Comm petsc_comm = PETSC_COMM_WORLD;
+    #endif
+        
     // Create DMDA with YOUR decomposition
-    ierr = DMDACreate2d(PETSC_COMM_WORLD,
+    ierr = DMDACreate2d(petsc_comm,
                        bx, by,
                        DMDA_STENCIL_STAR,
                        grid_nx, grid_ny,
@@ -221,17 +226,13 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Scalar
     // ============ Verify DMDA matches MPIDomain ============
     PetscInt xs, ys, xm, ym;
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
-    
-    if (xs != domain->start_x || ys != domain->start_y || 
-        xm != domain->nx || ym != domain->ny) {
-        PetscPrintf(PETSC_COMM_WORLD,
-                   "ERROR Rank %d: DMDA decomposition mismatch!\n"
-                   "  DMDA:      xs=%d, ys=%d, xm=%d, ym=%d\n"
-                   "  MPIDomain: start_x=%d, start_y=%d, nx=%d, ny=%d\n",
-                   domain->rank, (int)xs, (int)ys, (int)xm, (int)ym,
-                   domain->start_x, domain->start_y, domain->nx, domain->ny);
-        CHKERRQ(PETSC_ERR_ARG_WRONG);
-    }
+
+    PetscSynchronizedPrintf(PETSC_COMM_WORLD,
+        "Rank %d: cart_coords=(%d,%d) start=(%d,%d) nx=%d,ny=%d | DMDA: xs=%d,ys=%d,xm=%d,ym=%d\n",
+        domain->rank, domain->coords[0], domain->coords[1],
+        domain->start_x, domain->start_y, domain->nx, domain->ny,
+        (int)xs, (int)ys, (int)xm, (int)ym);
+    PetscSynchronizedFlush(PETSC_COMM_WORLD, STDOUT_FILENO);
     
     data->da = da;
 
