@@ -214,8 +214,6 @@ void compute_speed_mask(FishData* fish, VectorField* out, double time) {
 }
 
 void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time) {
-    int nx = fish->domain->tnx;
-    int ny = fish->domain->tny;
     int start_x = fish->domain->start_x;
     int start_y = fish->domain->start_y;
     double L = fish->L;
@@ -224,8 +222,8 @@ void compute_vorticity_mask(FishData* fish, ScalarField* vort_mask, double time)
     double Lfish = fish->Lfish;
 
     op_field(vort_mask, 0.0, set_scal);
-    for (int i = 0; i < nx - 1; ++i) {
-        for (int j = 0; j < ny - 1; ++j) {
+    for (int i = 0; i < vort_mask->nx; ++i) {
+        for (int j = 0; j < vort_mask->ny; ++j) {
             // Convert to global coordinates
             double x = (start_x + i) * h;
             double y = (start_y + j) * h;

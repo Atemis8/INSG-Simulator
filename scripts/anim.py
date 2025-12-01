@@ -52,6 +52,64 @@ def create_animation(frames_dir, data_loader, plot_setup, update_func, fps=24, o
         plt.show()
     return ani
 
+def w_nomask(frames_dir="dump"):
+    w_prefix = "w"
+    output_file = "vorticity.mp4"
+    dupl = (2, 2)
+
+    w_frame_dict, frames = load_frame_files(frames_dir, w_prefix)
+
+    if not os.path.isdir(frames_dir):
+        raise SystemExit(f"Error: directory '{frames_dir}' not found.")
+
+    w0 = np.load(w_frame_dict[frames[0]])
+    ny, nx = w0.shape
+
+    fig, ax = plt.subplots(figsize=(8, 8 * ny / nx))
+    plt.subplots_adjust(left=0, right=1, top=1, bottom=0)
+    ax.axis('off')
+
+    im = ax.imshow(
+        np.tile(w0, dupl),
+        cmap="coolwarm",
+        origin="lower",
+        animated=True,
+        vmin=-5,
+        vmax=5
+    )
+    ax.set_aspect("equal")
+
+    def init():
+        im.set_array(np.tile(w0, dupl))
+        return [im]
+
+    def update(i):
+        w_arr = np.load(w_frame_dict[frames[i]])
+        im.set_array(np.tile(w_arr, dupl))
+        return [im]
+
+    ani = animation.FuncAnimation(
+        fig,
+        update,
+        frames=len(frames),
+        init_func=init,
+        interval=1000/24,
+        blit=True
+    )
+
+    writer = animation.FFMpegWriter(
+        fps=24,
+        codec="libx264",
+        extra_args=["-crf", "28", "-preset", "slow"]
+    )
+
+    print(f"Saving → {output_file} …")
+    ani.save(output_file, writer=writer)
+    print("Done.")
+    return ani
+
+
+
 def w_periodic(frames_dir="dump"):
     w_prefix = "w"
     m_prefix = "mask"
@@ -82,8 +140,7 @@ def w_periodic(frames_dir="dump"):
                    animated=True, vmin=-5, vmax=5)
     
     black_cmap = ListedColormap([[0, 0, 0, 0], [0, 0, 0, 1]])
-    mask = ax.imshow(np.tile(m_data0, dupl), cmap=black_cmap, origin="lower",
-                     alpha=1.0, vmin=0, vmax=1, animated=True)
+    mask = ax.imshow(np.tile(m_data0, dupl), cmap=black_cmap, origin="lower", alpha=1.0, vmin=0, vmax=1, animated=True)
 
     ax.set_aspect('equal')
     def update(i):
@@ -156,5 +213,6 @@ def velocity_magnitude_animation(frames_dir):
     return create_animation(frames_dir, None, lambda: setup.data, update, output_file=output_file)
 
 
+#w_nomask()
 w_periodic()
 

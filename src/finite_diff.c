@@ -27,10 +27,10 @@ void vorticity(ScalarField *o, MACMesh *mesh) {
     // Uses v in [0, nx-1]x[0, ny-2]
     // Computes w in [0, nx-2]x[0, ny-2]
     PARALLEL(2)
-    for(int x = 0; x < u->nx-1; ++x)
-        for(int y = 0; y < u->ny-1; ++y) {
-            float du_dy = (get_scal(u, x, y + 1) - get_scal(u, x, y)) / mesh->h;
-            float dv_dx = (get_scal(v, x + 1, y) - get_scal(v, x, y)) / mesh->h;
+    for(int x = 0; x < o->nx; ++x)
+        for(int y = 0; y < o->ny; ++y) {
+            float du_dy = (get_scal(u, x + 1, y + 2) - get_scal(u, x + 1, y + 1)) / mesh->h;
+            float dv_dx = (get_scal(v, x + 2, y + 1) - get_scal(v, x + 1, y + 1)) / mesh->h;
             set_scal(o, x, y, dv_dx - du_dy);
         }
 }
@@ -179,11 +179,10 @@ void apply_periodic_bc(ScalarField *s) {
         set_scal(s, x, ny - 1, get_scal(s, x, 1));
     }
 
-    /* Corners (follow the same mapping) */
-    set_scal(s, 0,      0,      get_scal(s, nx - 2, ny - 2));
-    set_scal(s, 0,      ny - 1, get_scal(s, nx - 2, 1));
-    set_scal(s, nx - 1, 0,      get_scal(s, 1,       ny - 2));
-    set_scal(s, nx - 1, ny - 1, get_scal(s, 1,       1));
+    set_scal(s, 0, 0, get_scal(s, nx - 2, ny - 2));
+    set_scal(s, 0, ny - 1, get_scal(s, nx - 2, 1));
+    set_scal(s, nx - 1, 0, get_scal(s, 1, ny - 2));
+    set_scal(s, nx - 1, ny - 1, get_scal(s, 1, 1));
 }
 
 

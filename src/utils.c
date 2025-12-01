@@ -247,7 +247,7 @@ void save_scalar_value(double value, const char *filename) {
 PostProcessor initialize_postprocessor(Simulation *s, const char* dir_path) {
     MACMesh *m = &s->mesh;
     return (PostProcessor) {
-        .w = allocate_field(m->P.nx-1, m->P.ny-1),
+        .w = allocate_field(m->P.nx-3, m->P.ny-3),
         .dir = dir_path,
         .m = s
     };
