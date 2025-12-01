@@ -81,14 +81,14 @@ double reduce_field(ScalarField *f) {
     for (int i = 0; i < f->nx * f->ny; ++i) val += f->v[i];
     double global_sum = 0.0;
 
-    /*
+    
     #ifdef USE_MPI
     MPI_Allreduce(&val, &global_sum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     #else
     global_sum = val;
     #endif
-    */
-    return val;
+    
+    return global_sum;
 }
 
 double absmax_field(ScalarField *f) {
@@ -96,14 +96,14 @@ double absmax_field(ScalarField *f) {
     for (int i = 0; i < f->nx * f->ny; ++i) if(fabs(f->v[i]) > val) val = fabs(f->v[i]);
     double global_max = 0.0;
 
-    /*
+    
     #ifdef USE_MPI
     MPI_Allreduce(&val, &global_max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     #else
     global_max = val;
     #endif
-    */
-    return val;
+    
+    return global_max;
 }
 
 void fill_field(ScalarField *f, double h, double (*func)(double, double)) {

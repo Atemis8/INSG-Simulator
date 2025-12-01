@@ -42,57 +42,31 @@ void sim_step(Simulation *sim) {
 
     // Computation of the viscosity term (on the u and v centers)
     viscosity_term(mesh, vstar, set_scal);
-    synchronize_vecfield(vstar, domain);
-
     op_vecfield(vstar, dt * sim->params->nu, mul_scal);
-    synchronize_vecfield(vstar, domain);
 
     // Computation of the gradient term (on the u and v centers)
     grad_field(buffer, &(mesh->P), mesh->h, set_scal);
-    synchronize_vecfield(buffer, domain);
-
     op_vecfieldwise_mul(vstar, buffer, dt, sub_scal);
-    synchronize_vecfield(vstar, domain);
 
     // Computation of convective term
     // if (sim->mode == M_BOUNDARY) mesh->vmesh.x = body->ufish;
     
     // Computes the divergence field (on the u and v centers)
     divergence_form(mesh, Hn, set_scal);
-    synchronize_vecfield(Hn, domain);
-
     op_vecfieldwise_mul(Hnm1, Hn, 3, sub_scal);
-    synchronize_vecfield(Hnm1, domain);
-
     op_vecfieldwise_mul(vstar, Hnm1, 0.5 * dt, add_scal);
-    synchronize_vecfield(vstar, domain);
-
     op_vecfieldwise(Hnm1, Hn, set_scal);
-    synchronize_vecfield(Hnm1, domain);
     
     // Penalization computations
     compute_speed_mask(body, vsn1, sim->t);
-    synchronize_vecfield(vsn1, domain);
-    synchronize_vecfield(&body->mask, domain);
-
     op_vecfieldwise(vstar, &mesh->uv, add_scal);
-    synchronize_vecfield(vstar, domain);
 
     // Adds Penalization terms (at the u and v centers)
     op_vecfield(&body->mask, dt / dtau, mul_scal);
-    synchronize_vecfield(&body->mask, domain);
-
     op_vecfieldwise(vsn1, &body->mask, mul_scal);
-    synchronize_vecfield(vsn1, domain);
-
     op_vecfieldwise(vstar, vsn1, add_scal);
-    synchronize_vecfield(vstar, domain);
-
     op_vecfield(&body->mask, 1.0, add_scal);
-    synchronize_vecfield(&body->mask, domain);
-
     op_vecfieldwise(vstar, &body->mask, div_scal);
-    synchronize_vecfield(vstar, domain);
     // Updates ghost points
     // if (sim->mode == M_BOUNDARY) bc_outflow(mesh,vstar, body->ufish, dt);
     
@@ -101,17 +75,13 @@ void sim_step(Simulation *sim) {
 
     // Compute the divergence of vstar (at the P centers)
     divergence(phi, vstar, mesh->h, set_scal);
-    synchronize_field(phi, domain);
-
     poisson_solver(&(sim->pdata), phi, phi);
     synchronize_field(phi, domain);
 
     op_field(phi, mesh->h * mesh->h, mul_scal);
-    synchronize_field(phi, domain);
 
     // Set the vstar to the uv field
     op_vecfieldwise(&(mesh->uv), vstar, set_scal);
-    synchronize_vecfield(&(mesh->uv), domain);
 
     // Make the field divergence free
     grad_field(&(mesh->uv), phi, mesh->h, sub_scal);
@@ -119,21 +89,18 @@ void sim_step(Simulation *sim) {
 
     // Computes forces on the fish
     op_vecfield(&body->mask, 1.0, sub_scal); // X * dt / dtau
-    synchronize_vecfield(&body->mask, domain);
-
     op_vecfieldwise(vstar, &body->mask, mul_scal); // v* * X * dt / dtau
-    synchronize_vecfield(vstar, domain); 
-
     op_vecfieldwise(vstar, vsn1, sub_scal); // (v*-vsn1) * X * dt / dtau 
-    synchronize_vecfield(vstar, domain);
 
     compute_forces(body, vstar, sim->mode);
 
+    /*
     op_field(phi, 0.0, set_scal);
     divergence(phi, &(mesh->uv), mesh->h, set_scal);
     synchronize_field(phi, domain);
     mprintf(" div : %.3e ", reduce_field(phi));
-
+    */ 
+   
     assert(!(has_nan_vecfield(&(mesh->uv))));
     assert(!(has_nan_field(&(mesh->P))));
     

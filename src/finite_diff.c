@@ -202,6 +202,8 @@ void update_ghost_points(MPIDomain *domain, VectorField *uv, MACMesh *mesh, Mode
         apply_periodic_bc(v);
     #endif
         break;
+    case M_BOUNDARY:
+        break;
     default:
         break;
     }

@@ -129,7 +129,9 @@ void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
     
     /* Extract solution to ScalarField */
     extractSolution_DMDA(data->x, data->da, o, data->domain);
+#ifndef USE_MPI
     apply_periodic_bc(o);
+#endif
 }
 
 /*
