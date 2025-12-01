@@ -1,5 +1,5 @@
 #pragma once
-
+#include <assert.h>
 #ifdef USE_OPENMP
     #define PRAGMA(x) _Pragma(#x)
     #define PARALLEL(N) PRAGMA(omp parallel for collapse(N))

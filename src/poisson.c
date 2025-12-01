@@ -17,12 +17,21 @@ void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain)
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
     
     int gw = domain->ghost_width;
+    
+    // Verify we're accessing the right global range
+    assert(xs == domain->start_x && ys == domain->start_y);
+    assert(xm == domain->nx && ym == domain->ny);
+    
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
             // Map global DMDA indices to local ScalarField indices
             // i ∈ [start_x, start_x+nx) → local_x ∈ [gw, gw+nx)
-            int local_x = (i - xs) + gw;  // CORRECTED: use xs, not start_x
-            int local_y = (j - ys) + gw;  // CORRECTED: use ys, not start_y
+            int local_x = (i - xs) + gw; 
+            int local_y = (j - ys) + gw;
+            
+            // Safety check (remove after debugging)
+            assert(local_x >= gw && local_x < gw + domain->nx);
+            assert(local_y >= gw && local_y < gw + domain->ny);
             
             array[j][i] = get_scal(f, local_x, local_y);
         }
@@ -157,26 +166,72 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Scalar
     data->mode = mode;
     data->domain = domain;
 
-    /* Create DMDA for structured grid management */
     DM da;
     DMBoundaryType bx = (mode == M_PERIODIC) ? DM_BOUNDARY_PERIODIC : DM_BOUNDARY_NONE;
     DMBoundaryType by = (mode == M_PERIODIC) ? DM_BOUNDARY_PERIODIC : DM_BOUNDARY_NONE;
     
-    // Grid size excludes ghost cells (interior points only)
     PetscInt grid_nx = domain->global_nx;
     PetscInt grid_ny = domain->global_ny;
     
+    // ============ FIX: Tell DMDA your exact decomposition ============
+    
+    // Build arrays describing how many points each process has in each direction
+    PetscInt *lx = (PetscInt*)malloc(domain->dims[0] * sizeof(PetscInt));
+    PetscInt *ly = (PetscInt*)malloc(domain->dims[1] * sizeof(PetscInt));
+    
+    int base_nx = grid_nx / domain->dims[0];
+    int extra_nx = grid_nx % domain->dims[0];
+    int base_ny = grid_ny / domain->dims[1];
+    int extra_ny = grid_ny % domain->dims[1];
+    
+    // X-direction distribution (must match your MPIDomain calculation!)
+    for (int i = 0; i < domain->dims[0]; i++) {
+        lx[i] = base_nx + (i < extra_nx ? 1 : 0);
+    }
+    
+    // Y-direction distribution (must match your MPIDomain calculation!)
+    for (int j = 0; j < domain->dims[1]; j++) {
+        ly[j] = base_ny + (j < extra_ny ? 1 : 0);
+    }
+    
+    // Verify the sum is correct
+    PetscInt sum_x = 0, sum_y = 0;
+    for (int i = 0; i < domain->dims[0]; i++) sum_x += lx[i];
+    for (int j = 0; j < domain->dims[1]; j++) sum_y += ly[j];
+    assert(sum_x == grid_nx);
+    assert(sum_y == grid_ny);
+    
+    // Create DMDA with YOUR decomposition
     ierr = DMDACreate2d(PETSC_COMM_WORLD,
                        bx, by,
                        DMDA_STENCIL_STAR,
-                       grid_nx, grid_ny,     // Global interior grid size
+                       grid_nx, grid_ny,
                        domain->dims[0], domain->dims[1],
-                       1,                     // 1 DOF per node (scalar)
-                       1,                     // Stencil width = 1
-                       NULL, NULL,
+                       1,    // 1 DOF per node
+                       1,    // Stencil width = 1
+                       lx, ly,  // ← YOUR decomposition, not NULL!
                        &da); CHKERRQ(ierr);
+    
+    free(lx);
+    free(ly);
+    
     ierr = DMSetFromOptions(da); CHKERRQ(ierr);
     ierr = DMSetUp(da); CHKERRQ(ierr);
+    
+    // ============ Verify DMDA matches MPIDomain ============
+    PetscInt xs, ys, xm, ym;
+    DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
+    
+    if (xs != domain->start_x || ys != domain->start_y || 
+        xm != domain->nx || ym != domain->ny) {
+        PetscPrintf(PETSC_COMM_WORLD,
+                   "ERROR Rank %d: DMDA decomposition mismatch!\n"
+                   "  DMDA:      xs=%d, ys=%d, xm=%d, ym=%d\n"
+                   "  MPIDomain: start_x=%d, start_y=%d, nx=%d, ny=%d\n",
+                   domain->rank, (int)xs, (int)ys, (int)xm, (int)ym,
+                   domain->start_x, domain->start_y, domain->nx, domain->ny);
+        CHKERRQ(PETSC_ERR_ARG_WRONG);
+    }
     
     data->da = da;
 
