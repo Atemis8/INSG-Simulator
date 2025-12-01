@@ -61,6 +61,7 @@ void init_mpi(int argc, char *argv[]);
 void synchronize_cells(double *field, MPIDomain *domain);
 void synchronize_field(ScalarField *field, MPIDomain *domain);
 void synchronize_vecfield(VectorField *field, MPIDomain *domain);
+void update_domain_from_dmda(MPIDomain *domain, int start_x, int start_y, int nx, int ny);
 void print_field(double *field, MPIDomain *domain, const char *label);
 MPIDomain init_domain(int global_nx, int global_ny, int gw, Mode mode);
 

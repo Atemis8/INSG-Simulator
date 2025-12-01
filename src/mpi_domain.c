@@ -189,6 +189,31 @@ MPIDomain init_domain(int global_nx, int global_ny, int gw, Mode mode) {
     return domain;
 }
 
+void update_domain_from_dmda(MPIDomain *domain, int start_x, int start_y, int nx, int ny) {
+    // Free old MPI types
+    MPI_Type_free(&domain->y_slice);
+    MPI_Type_free(&domain->x_slice);
+    MPI_Type_free(&domain->corner);
+    
+    // Update decomposition
+    domain->start_x = start_x;
+    domain->start_y = start_y;
+    domain->nx = nx;
+    domain->ny = ny;
+    domain->tnx = nx + 2 * domain->ghost_width;
+    domain->tny = ny + 2 * domain->ghost_width;
+    
+    // Recreate MPI datatypes with correct sizes
+    MPI_Type_contiguous(domain->tny * domain->ghost_width, MPI_DOUBLE, &domain->y_slice);
+    MPI_Type_commit(&domain->y_slice);
+    
+    MPI_Type_vector(domain->tnx, domain->ghost_width, domain->tny, MPI_DOUBLE, &domain->x_slice);
+    MPI_Type_commit(&domain->x_slice);
+
+    MPI_Type_vector(domain->ghost_width, domain->ghost_width, domain->tny, MPI_DOUBLE, &domain->corner);
+    MPI_Type_commit(&domain->corner);
+}
+
 void synchronize_cells(double *field, MPIDomain *domain) {
     int tny = domain->tny;
     int nx = domain->nx;
@@ -333,6 +358,9 @@ void synchronize_vecfield(VectorField *field, MPIDomain *domain) {
     synchronize_field(&field->v, domain);
 }
 
+#ifndef USE_MPI
+void update_domain_from_dmda(MPIDomain *domain, int start_x, int start_y, int nx, int ny) {}
+#endif
 /*
 
 P   u   P   u   P   u   P   u   P   u

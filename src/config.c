@@ -39,6 +39,8 @@ void default_params(SimulationParams *params, double N, double Re, double Lstar,
 
 
 void init_simulation(Simulation *sim, SimulationParams *params, int argc, char **argv) {
+    init_poisson_solver(&params->domain, &(sim->pdata), params->mode);
+    
     MACMesh mesh = allocate_mesh(params->domain.tnx, params->domain.tny, params->h);
     params->body.mask = allocate_vecfield(params->domain.tnx, params->domain.tny);
     params->body.mask.u.type = 0;
@@ -57,7 +59,6 @@ void init_simulation(Simulation *sim, SimulationParams *params, int argc, char *
     mprintf("tnx : %d, tny : %d, nx : %d, ny : %d\n", params->domain.tnx, params->domain.tny, params->domain.nx, params->domain.ny);
     sim->vstar.u.type = 0;
     sim->vstar.v.type = 1;
-    init_poisson_solver(&params->domain, &(sim->pdata), &(sim->phi), params->mode);
 }
 
 void free_simulation(Simulation* sim) {

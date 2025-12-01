@@ -250,12 +250,12 @@ void test_poisson_solver(int N) {
     
     // Initialize MPI domain with periodic boundaries
     MPIDomain domain = init_domain(N, N, 1, M_PERIODIC);  // 1 = periodic
+
+    Poisson_data pdata;
+    init_poisson_solver(&domain, &pdata, M_PERIODIC);
     
     // Each process allocates its local portion with ghost cells
     ScalarField phi = allocate_field(domain.tnx, domain.tny);
-
-    Poisson_data pdata;
-    init_poisson_solver(&domain, &pdata, &phi, M_PERIODIC);
 
     // Set source term: f = -2π² sin(πx) sin(πy) in interior cells
     int gw = domain.ghost_width;

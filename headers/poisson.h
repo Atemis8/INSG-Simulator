@@ -16,5 +16,5 @@ typedef struct {
 } Poisson_data;
 
 void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o);
-PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, ScalarField* o, int mode);
+PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Mode mode);
 void free_poisson_solver(Poisson_data *data);

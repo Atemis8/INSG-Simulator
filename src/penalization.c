@@ -41,8 +41,6 @@ double lateral_displacement_dt(FishData* fish, double x, double t) {
 }
 
 double compute_fish_surface(FishData* fish) {
-    // Only rank 0 computes or all ranks compute the same value
-    // Since this doesn't depend on the domain decomposition
     int nx = fish->domain->global_nx;  // Use global size
     double Sfish = 0.0;
     for (int x = 0; x < nx; x++) {
