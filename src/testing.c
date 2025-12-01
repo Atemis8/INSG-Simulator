@@ -251,11 +251,25 @@ void test_poisson_solver(int N) {
     // Initialize MPI domain with periodic boundaries
     MPIDomain domain = init_domain(N, N, 1, M_PERIODIC);  // 1 = periodic
 
+    printf("domain : tnx=%d tny=%d nx=%d ny=%d gw=%d start_x=%d start_y=%d\n", 
+        domain.tnx, domain.tny, domain.nx, domain.ny, domain.ghost_width, domain.start_x, domain.start_y);
     Poisson_data pdata;
     init_poisson_solver(&domain, &pdata, h, M_PERIODIC);
-    
+     printf("domain : tnx=%d tny=%d nx=%d ny=%d gw=%d start_x=%d start_y=%d\n", 
+        domain.tnx, domain.tny, domain.nx, domain.ny, domain.ghost_width, domain.start_x, domain.start_y);
+        
     // Each process allocates its local portion with ghost cells
     ScalarField phi = allocate_field(domain.tnx, domain.tny);
+    ScalarField num_error = allocate_field(domain.tnx, domain.tny);
+
+    double local_rms_err = 0.0;
+    double local_max_err = 0.0;
+    int local_count = 0;
+
+    // Reduce errors across all processes
+    double global_rms_err = 0.0;
+    double global_max_err = 0.0;
+    int global_count = 0;
 
     // Set source term: f = -2π² sin(πx) sin(πy) in interior cells
     int gw = domain.ghost_width;
@@ -272,22 +286,52 @@ void test_poisson_solver(int N) {
     // Synchronize ghost cells (enforces periodic BC via MPI exchange)
     synchronize_field(&phi, &domain);
 
-    // Solve Poisson equation
-    poisson_solver(&pdata, &phi, &phi);
-    
-    // Synchronize solution ghost cells
-    synchronize_field(&phi, &domain);
-
-    // Compute error (check all cells including ghosts for periodic consistency)
-    ScalarField num_error = allocate_field(domain.tnx, domain.tny);
-    
-    double local_rms_err = 0.0;
-    double local_max_err = 0.0;
-    int local_count = 0;
-    
-    // Check all cells for error computation
     for (int x = 0; x < domain.tnx; ++x) {
         for (int y = 0; y < domain.tny; ++y) {
+            double xval = (domain.start_x + x - gw) * h;
+            double yval = (domain.start_y + y - gw) * h;
+            
+            double val = -2.0 * M_PI * M_PI * sin(M_PI * xval) * sin(M_PI * yval);
+            double err = val - get_scal(&phi, x, y);
+            
+            set_scal(&num_error, x, y, err);
+            
+            local_rms_err += err * err;
+            if (fabs(err) > local_max_err) local_max_err = fabs(err);
+            local_count++;
+        }
+    }
+
+    #ifdef USE_MPI
+    MPI_Allreduce(&local_rms_err, &global_rms_err, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&local_max_err, &global_max_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    MPI_Allreduce(&local_count, &global_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+#else
+    global_rms_err = local_rms_err;
+    global_max_err = local_max_err;
+    global_count = local_count;
+#endif
+
+    mprintf("Synchronize Test -> RMS error: %.3e, Max error: %.3e\n", sqrt(global_rms_err / global_count), global_max_err);
+
+
+    // Solve Poisson equation
+    poisson_solver(&pdata, &phi, &phi);
+    synchronize_field(&phi, &domain);
+    
+    local_rms_err = 0.0;
+    local_max_err = 0.0;
+    local_count = 0;
+
+    // Reduce errors across all processes
+    global_rms_err = 0.0;
+    global_max_err = 0.0;
+    global_count = 0;
+
+    // Check all cells for error computation
+    for (int x = gw; x < domain.tnx; ++x) {
+        for (int y = gw; y < domain.tny; ++y) {
+
             double xval = (domain.start_x + (x - gw)) * h;
             double yval = (domain.start_y + (y - gw)) * h;
             
@@ -302,11 +346,6 @@ void test_poisson_solver(int N) {
             local_count++;
         }
     }
-    
-    // Reduce errors across all processes
-    double global_rms_err = 0.0;
-    double global_max_err = 0.0;
-    int global_count = 0;
     
 #ifdef USE_MPI
     MPI_Allreduce(&local_rms_err, &global_rms_err, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);

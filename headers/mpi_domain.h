@@ -24,6 +24,16 @@ typedef enum Mode {
     M_BOUNDARY
 } Mode;
 
+#ifdef USE_MPI
+int MPI_Cart_shift_nd(
+    MPI_Comm cart_comm,
+    const int *offset,   // e.g. {-1, +1} or {+1, -1, +1}
+    int ndims,
+    int *source,
+    int *dest
+);
+#endif
+
 typedef struct {
 
 #ifdef USE_MPI

@@ -172,7 +172,6 @@ void sim_step(Simulation *sim, PerformanceProfile *prof) {
     divergence(phi, vstar, mesh->h, set_scal);
     poisson_solver(&(sim->pdata), phi, phi);
     synchronize_field(phi, domain);
-    op_field(phi, mesh->h * mesh->h, mul_scal);
     end_record(prof, "Poisson solver:");
 
     // Projection
@@ -189,6 +188,10 @@ void sim_step(Simulation *sim, PerformanceProfile *prof) {
     op_vecfieldwise(vstar, vsn1, sub_scal);
     compute_forces(body, vstar, sim->mode);
     end_record(prof, "Forces:");
+
+    op_field(phi, 0.0, set_scal);
+    divergence(phi, &mesh->uv, mesh->h, set_scal);
+    mprintf(" Div : %.3e ", absmax_field(phi));
 
     assert(!(has_nan_vecfield(&(mesh->uv))));
     assert(!(has_nan_field(&(mesh->P))));
@@ -238,6 +241,7 @@ int main(int argc, char *argv[]) {
             test_divergence(1.0, 1.0, 1.0 / (1ULL << 8));
 
         }
+        // test_mpidomain(12, 12);
         test_poisson_solver(111);
         test_poisson_solver(345);
         MPI_Finalize();

@@ -5,7 +5,6 @@ int rank = 0;
 int size = 1;
 int mpi_rank() {return rank;}
 int mpi_size() {return size;}
-
 // MPI Helper functions
 #ifdef USE_MPI
 
@@ -224,51 +223,20 @@ void synchronize_cells(double *field, MPIDomain *domain) {
     MPI_Status statuses[8];
     int req_count = 0;
     
-    // Anti deadlock code 
-    if (domain->east == domain->west && domain->east != MPI_PROC_NULL) {
-        if (domain->rank < domain->east) {
-            MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->y_slice, domain->east, 0, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(nx, 0, tny)], 1, domain->y_slice, domain->east, 1, domain->cart_comm, &requests[req_count++]);
-        } else {
-            MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->y_slice, domain->west, 1, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(gw, 0, tny)], 1, domain->y_slice, domain->west, 0, domain->cart_comm, &requests[req_count++]);
-        }
-
-        if (domain->rank < domain->east) {
-            MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->y_slice, domain->west, 1, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(gw, 0, tny)], 1, domain->y_slice, domain->west, 0, domain->cart_comm, &requests[req_count++]);
-        } else {
-            MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->y_slice, domain->east, 0, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(nx, 0, tny)], 1, domain->y_slice, domain->east, 1, domain->cart_comm, &requests[req_count++]);
-        }
-    } else if (domain->east != MPI_PROC_NULL) {
+    if (domain->east != MPI_PROC_NULL) {
         MPI_Irecv(&field[xytok(nx+gw, 0, tny)], 1, domain->y_slice, domain->east, 0, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(nx, 0, tny)], 1, domain->y_slice, domain->east, 1, domain->cart_comm, &requests[req_count++]);
-    } else if (domain->west != MPI_PROC_NULL) { 
+    }  
+    if (domain->west != MPI_PROC_NULL) { 
         MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->y_slice, domain->west, 1, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(gw, 0, tny)], 1, domain->y_slice, domain->west, 0, domain->cart_comm, &requests[req_count++]);
     }
     
-    if (domain->north == domain->south && domain->north != MPI_PROC_NULL) {
-        if (domain->rank < domain->south) {
-            MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->x_slice, domain->north, 2, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(0, ny, tny)], 1, domain->x_slice, domain->north, 3, domain->cart_comm, &requests[req_count++]);
-        } else {
-            MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->x_slice, domain->south, 3, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(0, gw, tny)], 1, domain->x_slice, domain->south, 2, domain->cart_comm, &requests[req_count++]);
-        }
-
-        if (domain->rank < domain->south) {
-           MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->x_slice, domain->south, 3, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(0, gw, tny)], 1, domain->x_slice, domain->south, 2, domain->cart_comm, &requests[req_count++]);
-        } else {
-            MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->x_slice, domain->north, 2, domain->cart_comm, &requests[req_count++]);
-            MPI_Isend(&field[xytok(0, ny, tny)], 1, domain->x_slice, domain->north, 3, domain->cart_comm, &requests[req_count++]);
-        }
-    } else if (domain->north != MPI_PROC_NULL) {
+    if (domain->north != MPI_PROC_NULL) {
         MPI_Irecv(&field[xytok(0, ny+gw, tny)], 1, domain->x_slice, domain->north, 2, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(0, ny, tny)], 1, domain->x_slice, domain->north, 3, domain->cart_comm, &requests[req_count++]);
-    } else if (domain->south != MPI_PROC_NULL) {
+    }  
+    if (domain->south != MPI_PROC_NULL) {
         MPI_Irecv(&field[xytok(0, 0, tny)], 1, domain->x_slice, domain->south, 3, domain->cart_comm, &requests[req_count++]);
         MPI_Isend(&field[xytok(0, gw, tny)], 1, domain->x_slice, domain->south, 2, domain->cart_comm, &requests[req_count++]);
     }

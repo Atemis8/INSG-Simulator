@@ -47,18 +47,22 @@ void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
     PetscInt i, j, xs, ys, xm, ym;
     
     DMDAVecGetArray(da, x, &array);
+    
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
     
     int gw = domain->ghost_width;
     
+    // Extract ALL cells including ghosts
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
+            // Map global DMDA coordinates to local ScalarField coordinates
             int local_x = (i - xs) + gw;
             int local_y = (j - ys) + gw;
-             
+            
             set_scal(o, local_x, local_y, array[j][i]);
         }
     }
+
     DMDAVecRestoreArray(da, x, &array);
 }
 
@@ -171,15 +175,7 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
     MPI_Comm petsc_comm = PETSC_COMM_WORLD;
 #endif
     
-    ierr = DMDACreate2d(petsc_comm,
-                       bx, by,
-                       DMDA_STENCIL_STAR,
-                       grid_nx, grid_ny,
-                       domain->dims[0], domain->dims[1],
-                       1, 1,
-                       NULL, NULL,
-                       &da); CHKERRQ(ierr);
-    
+    ierr = DMDACreate2d(petsc_comm, bx, by, DMDA_STENCIL_STAR, grid_nx, grid_ny, domain->dims[0], domain->dims[1], 1, 1, NULL, NULL, &da); CHKERRQ(ierr);
     ierr = DMSetFromOptions(da); CHKERRQ(ierr);
     ierr = DMSetUp(da); CHKERRQ(ierr);
     
@@ -189,8 +185,17 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
     
 #ifdef USE_MPI
     update_domain_from_dmda(domain, xs, ys, xm, ym);
+    
+    int temp_north, temp_south, temp_east, temp_west;
+    MPI_Cart_shift(domain->cart_comm, 0, 1, &domain->south, &domain->north);
+    MPI_Cart_shift(domain->cart_comm, 1, 1, &domain->west, &domain->east);
+    
+    // Swap corners too
+    int offset1[2] = {+1, -1};  // DMDA coords
+    int offset2[2] = {+1, +1};
+    MPI_Cart_shift_nd(domain->cart_comm, offset1, 2, &domain->ne, &domain->se);
+    MPI_Cart_shift_nd(domain->cart_comm, offset2, 2, &domain->sw, &domain->nw);
 #else
-    // Sequential mode - just update the values directly
     domain->start_x = xs;
     domain->start_y = ys;
     domain->nx = xm;
@@ -198,9 +203,6 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
     domain->tnx = xm + 2 * domain->ghost_width;
     domain->tny = ym + 2 * domain->ghost_width;
 #endif
-    printf("rank : %d, startx : %d, starty : %d, nx : %d, ny : %d, xs : %d, ys : %d, xm : %d, ym : %d\n",
-           mpi_rank(), domain->start_x, domain->start_y, domain->nx, domain->ny,
-           (int)xs, (int)ys, (int)xm, (int)ym);
     data->da = da;
 
     /* Create vectors from DMDA */
@@ -246,7 +248,7 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
         ierr = PCGAMGSetNSmooths(prec, 1); CHKERRQ(ierr);
     }
     
-    ierr = KSPSetTolerances(data->sles, 1e-8, 1e-8, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
+    ierr = KSPSetTolerances(data->sles, 1e-12, 1e-12, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
     ierr = KSPSetReusePreconditioner(data->sles, PETSC_TRUE); CHKERRQ(ierr);
     ierr = KSPSetUseFischerGuess(data->sles, 1, 4); CHKERRQ(ierr);
     ierr = KSPSetFromOptions(data->sles); CHKERRQ(ierr);
