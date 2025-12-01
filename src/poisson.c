@@ -19,8 +19,10 @@ void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain)
     int gw = domain->ghost_width;
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
-            int local_x = (i - domain->start_x) + gw;  // Map to local interior + ghost offset
-            int local_y = (j - domain->start_y) + gw;
+            // Map global DMDA indices to local ScalarField indices
+            // i ∈ [start_x, start_x+nx) → local_x ∈ [gw, gw+nx)
+            int local_x = (i - xs) + gw;  // CORRECTED: use xs, not start_x
+            int local_y = (j - ys) + gw;  // CORRECTED: use ys, not start_y
             
             array[j][i] = get_scal(f, local_x, local_y);
         }
@@ -43,12 +45,15 @@ void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
     
     int gw = domain->ghost_width;
     
-    // Extract local portion of solution
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
-            // Convert DMDA global indices to local ScalarField indices
-            int local_x = (i - domain->start_x) + gw;
-            int local_y = (j - domain->start_y) + gw;
+            // Map global DMDA indices to local ScalarField indices
+            int local_x = (i - xs) + gw;  // CORRECTED
+            int local_y = (j - ys) + gw;  // CORRECTED
+            
+            // Safety check
+            assert(local_x >= gw && local_x < gw + domain->nx);
+            assert(local_y >= gw && local_y < gw + domain->ny);
             
             set_scal(o, local_x, local_y, array[j][i]);
         }
