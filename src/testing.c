@@ -252,7 +252,7 @@ void test_poisson_solver(int N) {
     MPIDomain domain = init_domain(N, N, 1, M_PERIODIC);  // 1 = periodic
 
     Poisson_data pdata;
-    init_poisson_solver(&domain, &pdata, M_PERIODIC);
+    init_poisson_solver(&domain, &pdata, h, M_PERIODIC);
     
     // Each process allocates its local portion with ghost cells
     ScalarField phi = allocate_field(domain.tnx, domain.tny);
@@ -274,7 +274,6 @@ void test_poisson_solver(int N) {
 
     // Solve Poisson equation
     poisson_solver(&pdata, &phi, &phi);
-    op_field(&phi, h * h, mul_scal);
     
     // Synchronize solution ghost cells
     synchronize_field(&phi, &domain);

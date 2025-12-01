@@ -66,7 +66,7 @@ void extractSolution_DMDA(Vec x, DM da, ScalarField *o, MPIDomain *domain) {
  * computeLaplacianMatrix_DMDA: Assemble Laplacian matrix using DMDA stencil
  * Handles both periodic and boundary conditions
  */
-void computeLaplacianMatrix_DMDA(Mat A, DM da, int flagtype) {
+void computeLaplacianMatrix_DMDA(Mat A, DM da, double h, int flagtype) {
     PetscInt i, j, xs, ys, xm, ym, nx, ny;
     MatStencil row, col[5];
     PetscScalar v[5];
@@ -75,7 +75,7 @@ void computeLaplacianMatrix_DMDA(Mat A, DM da, int flagtype) {
     // Get local portion of grid
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
     DMDAGetInfo(da, NULL, &nx, &ny, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-    
+    double h2inv = 1.0 / (h * h);
     switch (flagtype) {
     case M_PERIODIC:
         // Periodic boundaries: standard 5-point stencil everywhere
@@ -85,11 +85,11 @@ void computeLaplacianMatrix_DMDA(Mat A, DM da, int flagtype) {
                 ncols = 0;
                 
                 // Center: -4
-                col[ncols].i = i; col[ncols].j = j; v[ncols++] = -4.0;
-                col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0;
-                col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0;
-                col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0;
-                col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0;
+                col[ncols].i = i; col[ncols].j = j; v[ncols++] = -4.0 * h2inv;
+                col[ncols].i = i - 1; col[ncols].j = j; v[ncols++] = 1.0 * h2inv;
+                col[ncols].i = i + 1; col[ncols].j = j; v[ncols++] = 1.0 * h2inv;
+                col[ncols].i = i; col[ncols].j = j - 1; v[ncols++] = 1.0 * h2inv;
+                col[ncols].i = i; col[ncols].j = j + 1; v[ncols++] = 1.0 * h2inv;
                 
                 MatSetValuesStencil(A, 1, &row, ncols, col, v, INSERT_VALUES);
             }
@@ -152,7 +152,7 @@ void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
  * Called once during simulation initialization
  */
 // In poisson.c
-PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Mode mode) {
+PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double h, Mode mode) {
     PetscErrorCode ierr;
 
     data->mode = mode;
@@ -211,7 +211,7 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Mode m
     ierr = DMCreateMatrix(da, &(data->A)); CHKERRQ(ierr);
     
     /* Assemble Laplacian matrix */
-    computeLaplacianMatrix_DMDA(data->A, da, mode);
+    computeLaplacianMatrix_DMDA(data->A, da, h, mode);
     
     ierr = MatAssemblyBegin(data->A, MAT_FINAL_ASSEMBLY); CHKERRQ(ierr);
     ierr = MatAssemblyEnd(data->A, MAT_FINAL_ASSEMBLY); CHKERRQ(ierr);
@@ -240,13 +240,10 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, Mode m
         ierr = PCSetType(prec, PCLU); CHKERRQ(ierr);
     } else {
         ierr = PCSetType(prec, PCGAMG); CHKERRQ(ierr);
-        ierr = PCGAMGSetNSmooths(prec, 1); CHKERRQ(ierr);
         ierr = PCGAMGSetType(prec, PCGAMGAGG); CHKERRQ(ierr);
-        ierr = PCGAMGSetNlevels(prec, 4); CHKERRQ(ierr);
-        ierr = PCGAMGSetAggressiveLevels(prec, 1); CHKERRQ(ierr);
-        ierr = PCGAMGSetThresholdScale(prec, 1.0); CHKERRQ(ierr);
-        PetscReal thr = 0.04;
+        PetscReal thr = -1.0;  // Changed from 0.04
         ierr = PCGAMGSetThreshold(prec, &thr, 1); CHKERRQ(ierr);
+        ierr = PCGAMGSetNSmooths(prec, 1); CHKERRQ(ierr);
     }
     
     ierr = KSPSetTolerances(data->sles, 1e-8, 1e-8, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
