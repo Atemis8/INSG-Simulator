@@ -17,12 +17,21 @@ void computeRHS_DMDA(Vec b, DM da, ScalarField *f, Mode mode, MPIDomain *domain)
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
     
     int gw = domain->ghost_width;
+    
+    // Verify we're accessing the right global range
+    assert(xs == domain->start_x && ys == domain->start_y);
+    assert(xm == domain->nx && ym == domain->ny);
+    
     for (j = ys; j < ys + ym; j++) {
         for (i = xs; i < xs + xm; i++) {
             // Map global DMDA indices to local ScalarField indices
             // i ∈ [start_x, start_x+nx) → local_x ∈ [gw, gw+nx)
-            int local_x = (i - xs) + gw;  // CORRECTED: use xs, not start_x
-            int local_y = (j - ys) + gw;  // CORRECTED: use ys, not start_y
+            int local_x = (i - xs) + gw; 
+            int local_y = (j - ys) + gw;
+            
+            // Safety check (remove after debugging)
+            assert(local_x >= gw && local_x < gw + domain->nx);
+            assert(local_y >= gw && local_y < gw + domain->ny);
             
             array[j][i] = get_scal(f, local_x, local_y);
         }
