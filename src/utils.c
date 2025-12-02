@@ -94,7 +94,29 @@ void save_field_mpiio(ScalarField* f, const char *filename, MPIDomain *domain) {
     MPI_File fh;
     MPI_Status status;
     int gw = domain->ghost_width;
-    // Open file for collective write (all ranks must participate)
+    
+    // Interior size for this rank
+    int local_nx = f->nx - 2 * gw;
+    int local_ny = f->ny - 2 * gw;
+    
+    // Compute global dimensions via reduction
+    int global_nx = 0, global_ny = 0;
+    int temp_nx = (domain->coords[1] == 0) ? local_nx : 0;  // Only count once per column
+    int temp_ny = (domain->coords[0] == 0) ? local_ny : 0;  // Only count once per row
+    
+    MPI_Allreduce(&temp_nx, &global_nx, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(&temp_ny, &global_ny, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    
+    // Compute this rank's start position
+    int start_x = 0, start_y = 0;
+    for (int r = 0; r < domain->rank; r++) {
+        int coords[2];
+        MPI_Cart_coords(domain->cart_comm, r, 2, coords);
+        if (coords[1] == domain->coords[1] && coords[0] < domain->coords[0]) start_x += local_nx;
+        if (coords[0] == domain->coords[0] && coords[1] < domain->coords[1]) start_y += local_ny;
+    }
+    
+    // Open file for collective write
     int ret = MPI_File_open(MPI_COMM_WORLD, filename, 
                            MPI_MODE_CREATE | MPI_MODE_WRONLY,
                            MPI_INFO_NULL, &fh);
@@ -124,7 +146,7 @@ void save_field_mpiio(ScalarField* f, const char *filename, MPIDomain *domain) {
         char header_str[512];
         snprintf(header_str, sizeof(header_str),
                 "{'descr': '<f8', 'fortran_order': True, 'shape': (%d, %d), }",
-                domain->global_ny, domain->global_nx);
+                global_ny, global_nx);
         
         int header_len = (int)strlen(header_str);
         int padding = 16 - ((10 + header_len) % 16);
@@ -148,32 +170,24 @@ void save_field_mpiio(ScalarField* f, const char *filename, MPIDomain *domain) {
         // Write header to file
         MPI_File_write(fh, header_data, header_size, MPI_BYTE, &status);
     }
+    
     // Broadcast header size to all ranks
     MPI_Bcast(&header_size, 1, MPI_OFFSET, 0, MPI_COMM_WORLD);
     
     // Extract interior data (without ghost cells)
-    int local_nx = f->nx - 2 * gw;
-    int local_ny = f->ny - 2 * gw;
     double *interior_data = malloc(local_nx * local_ny * sizeof(double));
     
     // Copy interior data (column-major: x varies fastest)
     for (int x = 0; x < local_nx; ++x) {
         for (int y = 0; y < local_ny; ++y) {
-            // Source: field with ghost cells at (gw+x, gw+y)
-            // Dest: interior array at index x*local_ny + y
             interior_data[x * local_ny + y] = get_scal(f, gw + x, gw + y);
         }
     }
+    
     // Create MPI datatype for this rank's portion of the global array
-    // The global array is stored in column-major order (Fortran order)
-    // Size of the global array
-    int gsizes[2] = {domain->global_ny, domain->global_nx};  // [rows, cols] in column-major
-    
-    // Size of local array (without ghost cells)
+    int gsizes[2] = {global_ny, global_nx};
     int lsizes[2] = {local_ny, local_nx};
-    
-    // Starting position in global array
-    int starts[2] = {domain->start_y, domain->start_x};
+    int starts[2] = {start_y, start_x};
     
     MPI_Datatype filetype;
     MPI_Type_create_subarray(2, gsizes, lsizes, starts,
@@ -186,6 +200,7 @@ void save_field_mpiio(ScalarField* f, const char *filename, MPIDomain *domain) {
     
     // Collective write
     MPI_File_write_all(fh, interior_data, local_nx * local_ny, MPI_DOUBLE, &status);
+    
     // Cleanup
     MPI_Type_free(&filetype);
     free(interior_data);
@@ -282,6 +297,9 @@ void dump_params(SimulationParams *params, PostProcessor *p) {
 
 void dump_mesh(int ep, PostProcessor *p) {
     MPIDomain *domain = &(p->m->params->domain);
+
+    printf("Rank %d domain : tnx=%d tny=%d nx=%d ny=%d gw=%d start_x=%d start_y=%d\n", 
+        mpi_rank(), domain->tnx, domain->tny, domain->nx, domain->ny, domain->ghost_width, domain->start_x, domain->start_y);
     
     char filename[256];
     
@@ -296,6 +314,8 @@ void dump_mesh(int ep, PostProcessor *p) {
     save_field(&(p->w), filename, domain);
 
     // Save u velocity
+
+    /*
     snprintf(filename, sizeof(filename), "%s/u_%05d.npy", p->dir, ep);
     save_field(&(p->m->mesh.uv.u), filename, domain);
 
@@ -306,6 +326,7 @@ void dump_mesh(int ep, PostProcessor *p) {
     // Save pressure
     snprintf(filename, sizeof(filename), "%s/P_%05d.npy", p->dir, ep);
     save_field(&(p->m->mesh.P), filename, domain);
+    */
 }
 
 void dump_fish_data(FishData *body, PostProcessor *p) {

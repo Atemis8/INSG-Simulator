@@ -255,9 +255,9 @@ void test_poisson_solver(int N) {
         domain.tnx, domain.tny, domain.nx, domain.ny, domain.ghost_width, domain.start_x, domain.start_y);
     Poisson_data pdata;
     init_poisson_solver(&domain, &pdata, h, M_PERIODIC);
-     printf("domain : tnx=%d tny=%d nx=%d ny=%d gw=%d start_x=%d start_y=%d\n", 
+    printf("domain : tnx=%d tny=%d nx=%d ny=%d gw=%d start_x=%d start_y=%d\n", 
         domain.tnx, domain.tny, domain.nx, domain.ny, domain.ghost_width, domain.start_x, domain.start_y);
-        
+
     // Each process allocates its local portion with ghost cells
     ScalarField phi = allocate_field(domain.tnx, domain.tny);
     ScalarField num_error = allocate_field(domain.tnx, domain.tny);

@@ -28,7 +28,7 @@ void default_params(SimulationParams *params, double N, double Re, double Lstar,
     params->dump_period = 20;
     params->nu = nu;
     params->h = h;
-    params->dt = 0.5 * min(dt_cfl, dt_r);
+    params->dt = 1e-3;
     params->dtau = params->dt / 1e4;
     params->mode = mode;
 
