@@ -242,7 +242,7 @@ int main(int argc, char *argv[]) {
 
         }
         // test_mpidomain(12, 12);
-        test_poisson_solver(111);
+        test_poisson_solver(256);
         test_poisson_solver(345);
         MPI_Finalize();
         exit(0);

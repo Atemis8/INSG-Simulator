@@ -56,7 +56,7 @@ void init_simulation(Simulation *sim, SimulationParams *params, int argc, char *
     sim->phi = field_like(&mesh.P);
     sim->mode = params->mode;
     sim->t = 0.0;
-    mprintf("tnx : %d, tny : %d, nx : %d, ny : %d\n", params->domain.tnx, params->domain.tny, params->domain.nx, params->domain.ny);
+    mprintf("gnx : %d, gny : %d, tnx : %d, tny : %d, nx : %d, ny : %d\n", params->domain.global_nx, params->domain.global_ny, params->domain.tnx, params->domain.tny, params->domain.nx, params->domain.ny);
     sim->vstar.u.type = 0;
     sim->vstar.v.type = 1;
 }

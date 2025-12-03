@@ -23,8 +23,8 @@ void vorticity(ScalarField *o, MACMesh *mesh) {
     ScalarField *u = &(mesh->uv.u);
     ScalarField *v = &(mesh->uv.v);
 
-    // Uses u in [0, nx-2]x[0, ny-1]
-    // Uses v in [0, nx-1]x[0, ny-2]
+    // Uses u in [1, nx-2]x[1, ny-1]
+    // Uses v in [1, nx-1]x[1, ny-2]
     // Computes w in [0, nx-2]x[0, ny-2]
     PARALLEL(2)
     for(int x = 0; x < o->nx; ++x)
