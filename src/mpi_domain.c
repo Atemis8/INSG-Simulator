@@ -188,29 +188,103 @@ MPIDomain init_domain(int global_nx, int global_ny, int gw, Mode mode) {
     return domain;
 }
 
-void update_domain_from_dmda(MPIDomain *domain, int start_x, int start_y, int nx, int ny) {
-    // Free old MPI types
+// --- replace update_domain_from_dmda and non-MPI stub ---
+// New signature includes Mode so periodicity is known
+static inline int eq_mod(int a, int b, int mod) {
+    int d = (a - b) % mod;
+    if (d < 0) d += mod;
+    return d == 0;
+}
+
+void update_domain_from_dmda(MPIDomain *domain, int start_x, int start_y, int nx, int ny, Mode mode) {
+    /* free old types if any */
     MPI_Type_free(&domain->y_slice);
     MPI_Type_free(&domain->x_slice);
     MPI_Type_free(&domain->corner);
-    
-    // Update decomposition
+
     domain->start_x = start_x;
     domain->start_y = start_y;
     domain->nx = nx;
     domain->ny = ny;
     domain->tnx = nx + 2 * domain->ghost_width;
     domain->tny = ny + 2 * domain->ghost_width;
-    
-    // Recreate MPI datatypes with correct sizes
+
     MPI_Type_contiguous(domain->tny * domain->ghost_width, MPI_DOUBLE, &domain->y_slice);
     MPI_Type_commit(&domain->y_slice);
-    
+
     MPI_Type_vector(domain->tnx, domain->ghost_width, domain->tny, MPI_DOUBLE, &domain->x_slice);
     MPI_Type_commit(&domain->x_slice);
 
     MPI_Type_vector(domain->ghost_width, domain->ghost_width, domain->tny, MPI_DOUBLE, &domain->corner);
     MPI_Type_commit(&domain->corner);
+
+    /* find neighbors by gathering all DMDA corners/sizes across the communicator used by DMDA */
+    MPI_Comm comm = domain->cart_comm;
+    int comm_rank, comm_size;
+    MPI_Comm_rank(comm, &comm_rank);
+    MPI_Comm_size(comm, &comm_size);
+
+    /* pack: start_x, start_y, nx, ny, rank */
+    int *send = malloc(5 * sizeof(int));
+    int *recv = malloc(5 * comm_size * sizeof(int));
+    send[0] = domain->start_x;
+    send[1] = domain->start_y;
+    send[2] = domain->nx;
+    send[3] = domain->ny;
+    send[4] = comm_rank;
+
+    MPI_Allgather(send, 5, MPI_INT, recv, 5, MPI_INT, comm);
+
+    /* initialize neighbors to MPI_PROC_NULL */
+    domain->north = domain->south = domain->east = domain->west = MPI_PROC_NULL;
+    domain->ne = domain->nw = domain->se = domain->sw = MPI_PROC_NULL;
+
+    int gx = domain->global_nx;
+    int gy = domain->global_ny;
+    int periodic_x = (mode == M_PERIODIC) ? 1 : 0;
+    int periodic_y = (mode == M_PERIODIC) ? 1 : 0;
+
+    int xs = domain->start_x, ys = domain->start_y;
+    int xe = xs + domain->nx;
+    int ye = ys + domain->ny;
+
+    if(periodic_x) xe = xe % gx;
+    if(periodic_y) ye = ye % gy;
+
+    for (int r = 0; r < comm_size; r++) {
+        int oxs = recv[5*r + 0];
+        int oys = recv[5*r + 1];
+        int onx = recv[5*r + 2];
+        int ony = recv[5*r + 3];
+        int orang = recv[5*r + 4];
+
+        int oxe = oxs + onx;
+        int oye = oys + ony;
+
+        if(periodic_x) oxe = oxe % gx;
+        if(periodic_y) oye = oye % gy;
+        
+        bool sx = xs == oxs;
+        bool sy = ys == oys;
+        
+        bool west = oxe == xs;
+        bool east = oxs == xe;
+        bool south = oye == ys;
+        bool north = oys == ye;
+
+        if (west && sy) domain->west = orang;
+        if (east && sy) domain->east = orang;
+        if (north && sx) domain->north = orang;
+        if (south && sx) domain->south = orang;
+
+        if (west && north) domain->nw = orang;
+        if (east && north) domain->ne = orang;
+        if (west && south) domain->sw = orang;
+        if (east && south) domain->se = orang;
+    }
+
+    free(send);
+    free(recv);
 }
 
 void synchronize_cells(double *field, MPIDomain *domain) {

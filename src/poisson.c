@@ -156,6 +156,7 @@ void poisson_solver(Poisson_data *data, ScalarField *i, ScalarField *o) {
  * Called once during simulation initialization
  */
 // In poisson.c
+// --- replace init_poisson_solver (only the function body) ---
 PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double h, Mode mode) {
     PetscErrorCode ierr;
 
@@ -165,36 +166,33 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
     DM da;
     DMBoundaryType bx = (mode == M_PERIODIC) ? DM_BOUNDARY_PERIODIC : DM_BOUNDARY_NONE;
     DMBoundaryType by = (mode == M_PERIODIC) ? DM_BOUNDARY_PERIODIC : DM_BOUNDARY_NONE;
-    
+
     PetscInt grid_nx = domain->global_nx;
     PetscInt grid_ny = domain->global_ny;
-    
+
 #ifdef USE_MPI
-    MPI_Comm petsc_comm = domain->cart_comm;
+    MPI_Comm petsc_comm = PETSC_COMM_WORLD;   // let PETSc/DMDA choose the decomposition
 #else
     MPI_Comm petsc_comm = PETSC_COMM_WORLD;
 #endif
-    
-    ierr = DMDACreate2d(petsc_comm, bx, by, DMDA_STENCIL_STAR, grid_nx, grid_ny, domain->dims[0], domain->dims[1], 1, 1, NULL, NULL, &da); CHKERRQ(ierr);
+
+    ierr = DMDACreate2d(petsc_comm, bx, by, DMDA_STENCIL_STAR,
+                        grid_nx, grid_ny,
+                        PETSC_DECIDE, PETSC_DECIDE,
+                        1, 1, NULL, NULL, &da); CHKERRQ(ierr);
     ierr = DMSetFromOptions(da); CHKERRQ(ierr);
     ierr = DMSetUp(da); CHKERRQ(ierr);
-    
-    // ============ Update MPIDomain to match DMDA ============
+
+    /* Query DMDA local corners and sizes */
     PetscInt xs, ys, xm, ym;
     DMDAGetCorners(da, &xs, &ys, NULL, &xm, &ym, NULL);
-    
+
 #ifdef USE_MPI
-    update_domain_from_dmda(domain, xs, ys, xm, ym);
-    
-    int temp_north, temp_south, temp_east, temp_west;
-    MPI_Cart_shift(domain->cart_comm, 0, 1, &domain->south, &domain->north);
-    MPI_Cart_shift(domain->cart_comm, 1, 1, &domain->west, &domain->east);
-    
-    // Swap corners too
-    int offset1[2] = {+1, -1};  // DMDA coords
-    int offset2[2] = {+1, +1};
-    MPI_Cart_shift_nd(domain->cart_comm, offset1, 2, &domain->ne, &domain->se);
-    MPI_Cart_shift_nd(domain->cart_comm, offset2, 2, &domain->sw, &domain->nw);
+    /* Use PETSc's communicator as the communicator for domain ops/halo exchanges */
+    domain->cart_comm = petsc_comm;
+
+    /* Update MPIDomain fields and compute neighbors based on DMDA decomposition */
+    update_domain_from_dmda(domain, (int)xs, (int)ys, (int)xm, (int)ym, mode);
 #else
     domain->start_x = xs;
     domain->start_y = ys;
@@ -203,6 +201,7 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
     domain->tnx = xm + 2 * domain->ghost_width;
     domain->tny = ym + 2 * domain->ghost_width;
 #endif
+
     data->da = da;
 
     /* Create vectors from DMDA */
@@ -211,10 +210,10 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
 
     /* Create matrix from DMDA */
     ierr = DMCreateMatrix(da, &(data->A)); CHKERRQ(ierr);
-    
+
     /* Assemble Laplacian matrix */
     computeLaplacianMatrix_DMDA(data->A, da, h, mode);
-    
+
     ierr = MatAssemblyBegin(data->A, MAT_FINAL_ASSEMBLY); CHKERRQ(ierr);
     ierr = MatAssemblyEnd(data->A, MAT_FINAL_ASSEMBLY); CHKERRQ(ierr);
 
@@ -230,24 +229,24 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
     ierr = KSPCreate(petsc_comm, &(data->sles)); CHKERRQ(ierr);
     ierr = KSPSetOperators(data->sles, data->A, data->A); CHKERRQ(ierr);
     ierr = KSPSetType(data->sles, KSPCG); CHKERRQ(ierr);
-    
+
     /* Set preconditioner */
     PC prec;
     ierr = KSPGetPC(data->sles, &prec); CHKERRQ(ierr);
-    
+
     int size;
     MPI_Comm_size(petsc_comm, &size);
-    
+
     if (size == 1) {
         ierr = PCSetType(prec, PCLU); CHKERRQ(ierr);
     } else {
         ierr = PCSetType(prec, PCGAMG); CHKERRQ(ierr);
         ierr = PCGAMGSetType(prec, PCGAMGAGG); CHKERRQ(ierr);
-        PetscReal thr = -1.0;  // Changed from 0.04
+        PetscReal thr = -1.0;
         ierr = PCGAMGSetThreshold(prec, &thr, 1); CHKERRQ(ierr);
         ierr = PCGAMGSetNSmooths(prec, 1); CHKERRQ(ierr);
     }
-    
+
     ierr = KSPSetTolerances(data->sles, 1e-12, 1e-12, PETSC_DEFAULT, PETSC_DEFAULT); CHKERRQ(ierr);
     ierr = KSPSetReusePreconditioner(data->sles, PETSC_TRUE); CHKERRQ(ierr);
     ierr = KSPSetUseFischerGuess(data->sles, 1, 4); CHKERRQ(ierr);
@@ -257,6 +256,7 @@ PetscErrorCode init_poisson_solver(MPIDomain *domain, Poisson_data *data, double
 
     return ierr;
 }
+
 
 /*
  * free_poisson_solver: Clean up PETSc objects
